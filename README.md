@@ -22,6 +22,11 @@ DEDSEC_PTZ_EXPLOIT is a exploit tool with the ability to send meticulously craft
 
 [![Star History Chart](https://api.star-history.com/svg?repos=0xbitx/DEDSEC_PTZ_EXPLOIT&type=Date)](https://star-history.com/#0xbitx/DEDSEC_PTZ_EXPLOIT&Date)
 
+
+## Windows camera audit
+
+A separate, source-available Windows tool is in [`windows-audit/`](windows-audit/README.md). It checks one private camera IP or a bounded local network for ONVIF/RTSP ports, tests anonymous PTZ and video access, and can open a confirmed stream in VLC. Install Python 3, open `windows-audit/START-WINDOWS.bat`, and use it only on devices you own or are authorized to assess. This is an independent diagnostic implementation, not a Windows build of the Linux executable.
+
 ## INSTALLATION 
     * git clone https://github.com/0xbitx/DEDSEC_PTZ_EXPLOIT.git
     * cd DEDSEC_PTZ_EXPLOIT
