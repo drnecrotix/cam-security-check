@@ -7,7 +7,7 @@ import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
-from scan import DEFAULT_PORTS, parse_ports, scan
+from scan import DEFAULT_PORTS, parse_ports, scan_hosts
 
 
 class App:
@@ -19,6 +19,7 @@ class App:
         self.ip = tk.StringVar()
         self.port = tk.StringVar(value='80')
         self.scan_ports = tk.StringVar(value=DEFAULT_PORTS)
+        self.network = tk.StringVar()
         self.status = tk.StringVar(value='Въведи локалния IP адрес на твоята камера.')
 
         frame = ttk.Frame(root, padding=18)
@@ -42,6 +43,12 @@ class App:
         ttk.Entry(line, textvariable=self.scan_ports).pack(side='left', fill='x', expand=True, padx=(0, 8))
         self.scan_button = ttk.Button(line, text='Намери портове', command=self.start_scan)
         self.scan_button.pack(side='left')
+        network_line = ttk.Frame(discover)
+        network_line.pack(fill='x', pady=(8, 0))
+        ttk.Label(network_line, text='Локална мрежа (CIDR)').pack(side='left', padx=(0, 8))
+        ttk.Entry(network_line, textvariable=self.network).pack(side='left', fill='x', expand=True, padx=(0, 8))
+        self.network_button = ttk.Button(network_line, text='Намери IP адреси', command=lambda: self.start_scan(True))
+        self.network_button.pack(side='left')
 
         buttons = ttk.Frame(frame)
         buttons.pack(fill='x', pady=(18, 12))
@@ -64,22 +71,34 @@ class App:
         self.output.insert('end', value)
         self.output.configure(state='disabled')
 
-    def start_scan(self):
+    def start_scan(self, network_mode=False):
         try:
-            ip = ipaddress.ip_address(self.ip.get().strip())
-            if ip.version != 4 or not ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-                raise ValueError('Въведи локален IPv4 адрес.')
+            if network_mode:
+                network = ipaddress.ip_network(self.network.get().strip(), strict=True)
+                if (network.version != 4 or network.num_addresses > 64 or
+                    not all(ip.is_private and not ip.is_loopback and not ip.is_link_local and not ip.is_reserved
+                            for ip in (network.network_address, network.broadcast_address))):
+                    raise ValueError('Използвай частна IPv4 мрежа с най-много 64 адреса (например 192.168.1.0/26).')
+                addresses = [str(ip) for ip in network.hosts()]
+            else:
+                ip = ipaddress.ip_address(self.ip.get().strip())
+                if ip.version != 4 or not ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                    raise ValueError('Въведи локален IPv4 адрес.')
+                addresses = [str(ip)]
             ports = parse_ports(self.scan_ports.get())
+            if len(addresses) * len(ports) > 512:
+                raise ValueError('Намали списъка с портове до най-много 512 проверки общо.')
         except ValueError as error:
             messagebox.showerror('Невалиден адрес или портове', str(error))
             return
         self.scan_button.configure(state='disabled')
-        self.status.set(f'Търся услуги на {ip} ({len(ports)} порта)...')
-        threading.Thread(target=self.scan_worker, args=(str(ip), ports), daemon=True).start()
+        self.network_button.configure(state='disabled')
+        self.status.set(f'Търся услуги на {len(addresses)} адреса и {len(ports)} порта...')
+        threading.Thread(target=self.scan_worker, args=(addresses, ports), daemon=True).start()
 
-    def scan_worker(self, ip, ports):
+    def scan_worker(self, addresses, ports):
         try:
-            results = scan(ip, ports)
+            results = scan_hosts(addresses, ports)
             self.root.after(0, lambda: self.show_scan(results))
         except Exception as error:
             message = str(error)
@@ -87,17 +106,19 @@ class App:
 
     def scan_failed(self, message):
         self.scan_button.configure(state='normal')
+        self.network_button.configure(state='normal')
         self.status.set('Търсенето не успя: ' + message)
 
     def show_scan(self, results):
         self.scan_button.configure(state='normal')
+        self.network_button.configure(state='normal')
         self.status.set(f'Открити отворени портове: {len(results)}')
         window = tk.Toplevel(self.root)
         window.title('Открити услуги на камерата')
         window.geometry('600x320')
         box = ttk.Frame(window, padding=14)
         box.pack(fill='both', expand=True)
-        ttk.Label(box, text='Избери ONVIF ред и натисни „Използвай порт“. Другите услуги са показани само за информация.',
+        ttk.Label(box, text='Избери ONVIF ред и натисни „Използвай адрес и порт“. Другите услуги са показани само за информация.',
                   wraplength=560).pack(anchor='w', pady=(0, 8))
         tree = ttk.Treeview(box, columns=('ip', 'port', 'service'), show='headings', selectmode='browse')
         for name, label, width in [('ip', 'IP адрес', 140), ('port', 'Порт', 70), ('service', 'Услуга', 330)]:
@@ -119,7 +140,7 @@ class App:
             self.port.set(port)
             window.destroy()
 
-        ttk.Button(box, text='Използвай порт', command=choose).pack(anchor='e', pady=(8, 0))
+        ttk.Button(box, text='Използвай адрес и порт', command=choose).pack(anchor='e', pady=(8, 0))
 
     def run(self, flag):
         try:
