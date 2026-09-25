@@ -10,6 +10,16 @@ If you do not know the ONVIF port, enter the camera's IP and press **Намер�
 
 If you do not know the camera IP, enter an **explicit private CIDR network** such as `192.168.1.0/26` and press **Намери IP адреси**. The result lists IP, port, and service; choosing an ONVIF row fills both fields. A search is capped at 64 addresses and 512 IP/port checks. The tool does not determine your network automatically. Check your router's LAN range before entering it and scan only networks you control.
 
+## Away from home: Tailscale subnet routing
+
+The **Отдалечен достъп през Tailscale** button explains how to use a computer that stays on at home as a subnet router. Install Tailscale on that home Windows PC, sign in, and run the generated `tailscale up --advertise-routes=...` command there from an Administrator PowerShell. Approve the route in Tailscale's admin console. Install Tailscale and sign into the same account on the Windows computer you use away from home. Then scan the home network through the existing interface. This requires a working home computer and connection; it cannot locate cameras over the Internet without a route to your home network. Do not expose ONVIF or RTSP ports directly to the Internet.
+
+The route can be the complete home LAN (for example `/24`), while each discovery search remains limited to 64 addresses. Search four `/26` portions of a `/24` separately. Official setup: https://tailscale.com/docs/use-cases/personal-or-at-home-use/access-devices-without-tailscale?tab=windows
+
+## Nearby Wi-Fi signals without joining a network
+
+On Windows, **Видими Wi-Fi сигнали наблизо** lists access points that the laptop's Wi-Fi adapter can currently hear, including their reported signal strength. The laptop does not need to join a network. A camera may appear only if it broadcasts its own hotspot/SSID (often during setup); a camera operating as a client of your router normally does not broadcast a separate network. The list cannot identify a camera conclusively, detect a camera far away, or read video. Windows may require Wi-Fi and location permission for the network list.
+
 If Windows cannot find Python, install it from [python.org](https://www.python.org/downloads/windows/) with the Python launcher enabled. Alternatively open PowerShell in this folder and run:
 
 ```powershell
