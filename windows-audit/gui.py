@@ -13,6 +13,7 @@ from scan import DEFAULT_PORTS, parse_ports, scan_hosts
 from wifi_scan import nearby_networks
 from reporting import render_html
 from local_lan import ethernet_networks
+from audit import discover_usernames
 
 CONFIG_PATH = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'CameraAudit' / 'cameras.json'
 
@@ -66,6 +67,7 @@ class App:
             ttk.Label(auth, text=label).grid(row=0, column=column, sticky='w')
             ttk.Entry(auth, textvariable=var, show=show).grid(row=1, column=column, sticky='ew', padx=(0, 8))
             auth.columnconfigure(column, weight=1)
+        ttk.Button(frame, text='Открий ONVIF потребител', command=self.discover_username_only).pack(anchor='w', pady=(6, 0))
 
         discover = ttk.Frame(frame)
         discover.pack(fill='x', pady=(12, 0))
@@ -164,6 +166,58 @@ class App:
                 self.status.set('Отчетът е записан без парола и видео адрес.')
             except OSError as error:
                 messagebox.showerror('Грешка', str(error))
+
+    def saved_username(self, ip, port):
+        return next((c['username'] for c in self.cameras
+                     if c['ip'] == str(ip) and c['port'] == port and c.get('username')), None)
+
+    def discover_username_only(self):
+        try:
+            ip = ipaddress.ip_address(self.ip.get().strip())
+            port = int(self.port.get().strip())
+            if ip.version != 4 or not ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or not 1 <= port <= 65535:
+                raise ValueError()
+        except ValueError:
+            messagebox.showerror('Невалиден адрес', 'Първо въведи локалния IP адрес и ONVIF порта на камерата.')
+            return
+        self.lookup_username(str(ip), port, None, resume=False)
+
+    def lookup_username(self, ip, port, pending_flag, resume):
+        self.status.set('Проверявам дали камерата предоставя ONVIF потребителите без парола...')
+        def worker():
+            try:
+                names = discover_usernames(ip, port)
+                self.root.after(0, lambda: self.username_found(names, pending_flag, resume))
+            except (OSError, ValueError) as error:
+                message = str(error)
+                self.root.after(0, lambda: self.username_found([], pending_flag, resume, message))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def username_found(self, names, pending_flag, resume, error=None):
+        if len(names) == 1:
+            self.username.set(names[0])
+            self.status.set(f'ONVIF потребителят е открит: {names[0]}')
+        elif len(names) > 1:
+            window = tk.Toplevel(self.root)
+            window.title('Избери ONVIF потребител')
+            box = ttk.Frame(window, padding=14)
+            box.pack(fill='both', expand=True)
+            ttk.Label(box, text='Камерата върна няколко потребителя. Избери своя:').pack()
+            choice = ttk.Combobox(box, state='readonly', values=names)
+            choice.pack(fill='x', pady=8)
+            choice.current(0)
+            def select():
+                self.username.set(choice.get())
+                window.destroy()
+                if resume:
+                    self.run(pending_flag, resolved=True)
+            ttk.Button(box, text='Използвай', command=select).pack()
+            return
+        else:
+            self.status.set('Камерата не предоставя потребителски имена без удостоверяване.' +
+                            (f' {error}' if error else ''))
+        if resume:
+            self.run(pending_flag, resolved=True)
 
     def show(self, value):
         self.output.configure(state='normal')
@@ -357,7 +411,7 @@ class App:
 
         ttk.Button(box, text='Използвай адрес и порт', command=choose).pack(anchor='e', pady=(8, 0))
 
-    def run(self, flag):
+    def run(self, flag, resolved=False):
         try:
             ip = ipaddress.ip_address(self.ip.get().strip())
             port = int(self.port.get().strip())
@@ -366,6 +420,13 @@ class App:
         except ValueError:
             messagebox.showerror('Невалиден адрес', 'Въведи локалния IP на камерата, например 192.168.0.50, и ONVIF порт от 1 до 65535. Публичният IP на рутера не е адрес на камерата. Ако си извън дома, свържи се през Tailscale.')
             return
+        if not self.username.get().strip() and not resolved:
+            saved = self.saved_username(ip, port)
+            if saved:
+                self.username.set(saved)
+            else:
+                self.lookup_username(str(ip), port, flag, resume=True)
+                return
         if flag == '--move-test' and not messagebox.askyesno('PTZ движение',
                 'Камерата може да се премести за кратко. Наблюдавай я и продължи само ако е твоя или имаш разрешение.'):
             return
