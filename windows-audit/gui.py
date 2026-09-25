@@ -5,9 +5,11 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
+import webbrowser
 from pathlib import Path
 from tkinter import messagebox, ttk
 from scan import DEFAULT_PORTS, parse_ports, scan_hosts
+from wifi_scan import nearby_networks
 
 
 class App:
@@ -49,6 +51,8 @@ class App:
         ttk.Entry(network_line, textvariable=self.network).pack(side='left', fill='x', expand=True, padx=(0, 8))
         self.network_button = ttk.Button(network_line, text='Намери IP адреси', command=lambda: self.start_scan(True))
         self.network_button.pack(side='left')
+        ttk.Button(discover, text='Отдалечен достъп през Tailscale', command=self.remote_help).pack(anchor='w', pady=(8, 0))
+        ttk.Button(discover, text='Видими Wi-Fi сигнали наблизо', command=self.wifi_signals).pack(anchor='w', pady=(4, 0))
 
         buttons = ttk.Frame(frame)
         buttons.pack(fill='x', pady=(18, 12))
@@ -70,6 +74,86 @@ class App:
         self.output.delete('1.0', 'end')
         self.output.insert('end', value)
         self.output.configure(state='disabled')
+
+    def wifi_signals(self):
+        window = tk.Toplevel(self.root)
+        window.title('Видими Wi-Fi сигнали')
+        window.geometry('700x520')
+        box = ttk.Frame(window, padding=14)
+        box.pack(fill='both', expand=True)
+        ttk.Label(box, text='Близки Wi-Fi мрежи - без свързване към тях', font=('Segoe UI', 13, 'bold')).pack(anchor='w')
+        ttk.Label(box, text='Показва SSID, BSSID и сила на сигнала, когато Windows ги предоставя. Това не доказва, че мрежата е камера.',
+                  wraplength=650).pack(anchor='w', pady=(4, 10))
+        view = tk.Text(box, wrap='none', font=('Consolas', 10))
+        view.pack(fill='both', expand=True)
+
+        def update():
+            view.delete('1.0', 'end')
+            view.insert('end', 'Търся сигнали...')
+            def worker():
+                try:
+                    result = nearby_networks()
+                except (OSError, subprocess.TimeoutExpired, RuntimeError) as error:
+                    result = f'Грешка: {error}\nПровери Wi-Fi адаптера и разрешението за местоположение в Windows.'
+                def display():
+                    if window.winfo_exists():
+                        view.delete('1.0', 'end')
+                        view.insert('end', result)
+                self.root.after(0, display)
+            threading.Thread(target=worker, daemon=True).start()
+
+        ttk.Button(box, text='Обнови списъка', command=update).pack(anchor='e', pady=(8, 0))
+        update()
+
+    def remote_help(self):
+        window = tk.Toplevel(self.root)
+        window.title('Отдалечен достъп до домашните камери')
+        window.geometry('610x390')
+        box = ttk.Frame(window, padding=18)
+        box.pack(fill='both', expand=True)
+        guide = ('1. На постоянно включения домашен Windows компютър инсталирай Tailscale и влез в акаунта си.\n'
+                 '2. Въведи домашната мрежа в главния прозорец. На домашния компютър отвори PowerShell като администратор и изпълни генерираната команда.\n'
+                 '3. Одобри маршрута в Tailscale Admin Console > Machines > Edit route settings.\n'
+                 '4. Инсталирай Tailscale на отдалечения компютър и влез в същия акаунт.\n'
+                 '5. След свързване натисни „Намери IP адреси“ в главния прозорец. За /24 мрежа търси последователно четири /26 части.')
+        ttk.Label(box, text=guide, wraplength=560, justify='left').pack(anchor='w', pady=(0, 12))
+        command = tk.StringVar(value='Въведи валидна домашна мрежа в главния прозорец.')
+        ttk.Entry(box, textvariable=command, state='readonly').pack(fill='x')
+        status = tk.StringVar(value='')
+
+        def generate():
+            try:
+                network = ipaddress.ip_network(self.network.get().strip(), strict=True)
+                if network.version != 4 or not network.is_private or network.is_loopback or network.is_link_local or network.is_reserved:
+                    raise ValueError()
+                command.set(f'tailscale up --advertise-routes={network}')
+            except ValueError:
+                command.set('Въведи валидна домашна IPv4 мрежа, например 192.168.1.0/24.')
+
+        def copy():
+            if not command.get().startswith('tailscale up '):
+                generate()
+            if command.get().startswith('tailscale up '):
+                window.clipboard_clear()
+                window.clipboard_append(command.get())
+                status.set('Командата е копирана. Изпълни я само на домашния компютър.')
+
+        def check():
+            try:
+                result = subprocess.run(['tailscale', 'status'], capture_output=True, timeout=5)
+                status.set('Tailscale е активен на този компютър.' if result.returncode == 0 else
+                           'Tailscale е инсталиран, но няма активна връзка.')
+            except (OSError, subprocess.TimeoutExpired):
+                status.set('Tailscale не е открит или не отговаря на този компютър.')
+
+        buttons = ttk.Frame(box)
+        buttons.pack(fill='x', pady=(10, 8))
+        for label, action in [('Генерирай команда', generate), ('Копирай', copy),
+                              ('Провери връзката', check),
+                              ('Отвори Tailscale инструкции', lambda: webbrowser.open('https://tailscale.com/docs/use-cases/personal-or-at-home-use/access-devices-without-tailscale?tab=windows'))]:
+            ttk.Button(buttons, text=label, command=action).pack(anchor='w', pady=2)
+        ttk.Label(box, textvariable=status, wraplength=560).pack(anchor='w')
+        generate()
 
     def start_scan(self, network_mode=False):
         try:
