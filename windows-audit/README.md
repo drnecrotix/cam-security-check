@@ -88,3 +88,31 @@ If movement is exposed, update camera firmware, enable ONVIF authentication wher
 Use **Пълен отчет / Full audit** for anonymous ONVIF and RTSP video checks, an authenticated comparison when you enter credentials, video profiles, and a detailed checklist with evidence, risk and actions. Save the report as HTML or JSON. PTZ movement and snapshot capture remain separate explicit actions.
 
 The entered password is assessed offline for length, predictable patterns and a small built-in list of common values. The tool does not attempt password guessing against the camera. This heuristic is not a breach database check or proof that a password cannot be guessed. Password text is omitted from reports and saved camera entries. A successful credentialed request does not establish that authentication was enforced when the same anonymous operation succeeds.
+
+### Dashboard layout
+
+The main window keeps camera details, checks and the scrollable result console visible together. **Търсене и мрежа / Discovery and network** opens the LAN, port and nearby Wi-Fi tools in a separate window. Discovered camera addresses fill the main dashboard. The discovery window can be closed during a scan without breaking the controls.
+
+The status dot is yellow while a check or search is running, green when an ONVIF check succeeds or discovery finds entries, and red on errors or empty discovery. A remote host may close an individual TCP connection during a scan; other ports continue to be checked. Windows enforce minimum window sizes so action buttons remain visible. Exported HTML reports place a plain-language priority summary before the detailed checks and include `dev: dr.necrotix` at the bottom right.
+
+### Other IP cameras
+
+Use **Други IP камери (RTSP/HTTP) / Other IP cameras (RTSP/HTTP)** for a private-network device without ONVIF. Supply its HTTP and RTSP ports and, if known, the RTSP path from its own settings or manual. An empty RTSP path skips video testing. The app checks HTTP response and RTSP DESCRIBE with and without supplied credentials; it does not guess vendor stream paths, record video, or store the password or RTSP URL. Discovery marks protocol evidence as ONVIF, RTSP or HTTP. An HTTP service alone is not proof that the device is a camera.
+
+### Automated security assessment
+
+**Пълен отчет / Full audit** runs non-destructive ONVIF and RTSP access checks. The report lists each check as passed, failed or unknown, ONVIF device information returned by the camera, and an evidence-limited rating: excellent, good, weak or insufficient data. A failed protection check makes the rating weak; unreachable endpoints never count as passed. A protected RTSP URI can be tested anonymously when retrieved with supplied credentials. PTZ movement remains a separate explicit opt-in.
+
+The default report omits credentials and stream URLs. To retain stream URLs in memory during an audit, enable **Събери адресите на потоците за поверителен отчет** before the run. At export choose a confidential report to include those URLs and the password currently supplied to the check; handle this HTML/JSON file as a secret. Normal export excludes them. The password is never written to the saved camera inventory.
+
+Run the local checks with `python -m unittest discover -s tests -v` from the `windows-audit` folder.
+
+### Expanded offline password audit
+
+When you enter an ONVIF or RTSP password, the app compares it locally against a bounded set of common camera passwords, numeric guesses, username variants and simple suffixes. It also checks length, repeated characters, keyboard sequences, years, username inclusion and low character variety. The report records only the result, pattern names and number of local candidates, not candidate strings or the password in a standard export. This is a heuristic, not proof that a password is resistant to cracking. No dictionary or brute-force attempts are sent to the camera; account lockout and service disruption are avoided.
+
+### Missing confidential fields and camera Wi-Fi
+
+The confidential export explains whether stream collection was enabled at the time of the latest audit. An empty stream list means the camera returned no ONVIF stream URI, or the RTSP path was not supplied for a non-ONVIF camera. The username and password fields contain only credentials entered for that specific check; the app does not retrieve an existing password from a camera.
+
+For ONVIF devices supporting IEEE 802.11 operations, the full audit reads `GetNetworkInterfaces` and `GetDot11Status` for configured/active SSID, BSSID and signal strength. It never includes Wi-Fi PSK or passphrase fields. Wired devices and cameras that do not expose these operations show an explicit unavailable state. The report footer links `dr.necrotix` to `https://necrotixlab.com/services` in a new browser tab.

@@ -2,8 +2,10 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import ipaddress
 import socket
+import urllib.error
+import urllib.request
 
-from audit import DEV, call
+from audit import DEV, NoRedirect, call
 
 DEFAULT_PORTS = '80,554,8000,8080,8081,8899,9000'
 
@@ -44,16 +46,33 @@ def check(ip, port):
     except OSError:
         return None
     url = f'http://{ip}:{port}/onvif/device_service'
-    result = call(url, f'<d:GetCapabilities xmlns:d="{DEV}"><d:Category>All</d:Category></d:GetCapabilities>', 1.2)
+    try:
+        result = call(url, f'<d:GetCapabilities xmlns:d="{DEV}"><d:Category>All</d:Category></d:GetCapabilities>', 1.2)
+    except (OSError, ConnectionError):
+        result = {'ok': False, 'status': None, 'error': 'Connection closed'}
     if result['ok']:
         service = 'ONVIF - достъп без парола'
     elif result['status'] in (401, 403) or result['error'] == 'SOAP Fault':
         service = 'ONVIF - вероятно изисква удостоверяване'
     else:
         try:
-            service = 'RTSP' if probe(ip, port) else 'Отворен порт - непозната услуга'
+            if probe(ip, port):
+                service = 'RTSP - протокол открит'
+            else:
+                service = 'Отворен порт - непозната услуга'
         except OSError:
             service = 'Отворен порт - непозната услуга'
+        # A web response identifies HTTP only, never proves the device is a camera.
+        if service.startswith('Отворен порт'):
+            try:
+                request = urllib.request.Request(url=f'http://{ip}:{port}/', method='HEAD')
+                with urllib.request.build_opener(NoRedirect).open(request, timeout=1) as response:
+                    service = 'HTTP - уеб интерфейс' if response.status < 500 else service
+            except urllib.error.HTTPError as error:
+                if error.code in (401, 403, 405):
+                    service = 'HTTP - уеб интерфейс'
+            except (urllib.error.URLError, TimeoutError, OSError):
+                pass
     return (str(ip), port, service)
 
 
@@ -64,7 +83,10 @@ def scan_hosts(addresses, ports):
     results = []
     with ThreadPoolExecutor(max_workers=64) as executor:
         for future in as_completed([executor.submit(check, ip, p) for ip in addresses for p in ports]):
-            result = future.result()
+            try:
+                result = future.result()
+            except (OSError, ConnectionError):
+                continue
             if result:
                 results.append(result)
     return sorted(results, key=lambda row: (ipaddress.ip_address(row[0]), row[1]))

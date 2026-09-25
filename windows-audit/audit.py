@@ -19,6 +19,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from password_audit import assess
 from reporting import checklist
+from security_assessment import assess as assess_security
 from urllib.parse import urlparse
 from xml.sax.saxutils import escape
 
@@ -80,6 +81,43 @@ def first_text(root, local):
     if root is None:
         return None
     return next((e.text for e in root.iter() if e.tag.endswith('}' + local) and e.text), None)
+
+
+def wireless_information(device, timeout, credentials=None):
+    """Read ONVIF Wi-Fi status only; never include PSK/passphrase elements."""
+    response = call(device, f'<d:GetNetworkInterfaces xmlns:d="{DEV}"/>', timeout, credentials)
+    if not response['ok'] or response['root'] is None:
+        return [], []
+    interfaces, wireless = [], []
+    for node in response['root'].iter():
+        if not node.tag.endswith('}NetworkInterfaces'):
+            continue
+        token = node.attrib.get('token', '')
+        info = next((x for x in node if x.tag.endswith('}Info')), None)
+        entry = {'name': (first_text(info, 'Name') or '')[:80],
+                 'mac': (first_text(info, 'HwAddress') or '')[:32],
+                 'addresses': list(dict.fromkeys((x.text or '')[:45] for x in node.iter()
+                            if x.tag.endswith('}Address') and x.text))[:8]}
+        interfaces.append(entry)
+        dot11 = [x for x in node.iter() if x.tag.endswith('}Dot11')]
+        for config in dot11[:4]:
+            ssid = first_text(config, 'SSID')
+            if ssid:
+                wireless.append({'interface': entry['name'], 'ssid': ssid[:80], 'source': 'GetNetworkInterfaces'})
+        if token and (dot11 or first_text(node, 'InterfaceType') == '71'):
+            request = (f'<d:GetDot11Status xmlns:d="{DEV}">'
+                       f'<d:InterfaceToken>{escape(token)}</d:InterfaceToken></d:GetDot11Status>')
+            status = call(device, request, timeout, credentials)
+            if status['ok'] and status['root'] is not None:
+                state = next((x for x in status['root'].iter() if x.tag.endswith('}Status')), None)
+                ssid = first_text(state, 'SSID')
+                if ssid:
+                    wireless = [x for x in wireless if x['interface'] != entry['name']]
+                    wireless.append({'interface': entry['name'], 'ssid': ssid[:80],
+                                     'bssid': (first_text(state, 'BSSID') or '')[:40],
+                                     'signal': (first_text(state, 'SignalStrength') or '')[:40],
+                                     'source': 'GetDot11Status'})
+    return interfaces[:8], wireless[:8]
 
 
 def profile_list(root):
@@ -254,6 +292,7 @@ def main():
     p.add_argument('--password-stdin', action='store_true', help='Read password from standard input (GUI use)')
     p.add_argument('--snapshot', help='Save a JPEG snapshot via ONVIF; FFmpeg fallback for anonymous RTSP')
     p.add_argument('--report', help='Save JSON report without credentials')
+    p.add_argument('--include-sensitive', action='store_true', help='Include stream URIs in process output (treat as confidential)')
     a = p.parse_args()
     if a.password_stdin and not a.username:
         p.error('--password-stdin requires --username')
@@ -276,6 +315,10 @@ def main():
     service_root = auth_caps['root'] if auth_caps and auth_caps['ok'] else caps['root']
     media_url = service_url(service_root, 'Media', base + '/onvif/media_service', ip)
     ptz_url = service_url(service_root, 'PTZ', base + '/onvif/ptz_service', ip)
+    info = call(device, f'<d:GetDeviceInformation xmlns:d="{DEV}"/>', a.timeout,
+                credentials if auth_caps and auth_caps['ok'] else None)
+    network_interfaces, wireless = wireless_information(
+        device, a.timeout, credentials if auth_caps and auth_caps['ok'] else None)
     profiles = call(media_url, f'<m:GetProfiles xmlns:m="{MEDIA}"/>', a.timeout)
     auth_profiles = call(media_url, f'<m:GetProfiles xmlns:m="{MEDIA}"/>', a.timeout, credentials) if credentials else None
     anonymous_items = profile_list(profiles['root']) if profiles['ok'] else []
@@ -291,8 +334,11 @@ def main():
     result = {'target': str(ip), 'port': a.port, 'anonymous_capabilities': caps['ok'],
               'anonymous_profiles': profiles['ok'], 'anonymous_ptz_status': status['ok'] if status else None,
               'http_status': {'capabilities': caps['status'], 'profiles': profiles['status'], 'ptz': status['status'] if status else None},
+              'device_information': {key: (first_text(info['root'], key) or '')[:120] for key in
+                                     ('Manufacturer', 'Model', 'FirmwareVersion', 'SerialNumber', 'HardwareId')} if info['ok'] else {},
+              'network_interfaces': network_interfaces, 'wireless_interfaces': wireless,
               'movement_attempted': False, 'movement_accepted': None, 'stop_accepted': None,
-              'anonymous_stream_uri': False, 'rtsp_describe': None, 'viewer_started': False,
+              'anonymous_stream_uri': False, 'stream_uri_http_status': None, 'rtsp_describe': None, 'viewer_started': False,
               'authenticated': bool(credentials),
               'authenticated_capabilities': auth_caps['ok'] if auth_caps else None,
               'authenticated_profiles': auth_profiles['ok'] if auth_profiles else None,
@@ -303,6 +349,8 @@ def main():
               'snapshot_saved': False, 'snapshot_error': None,
               'password_assessment': assess(credentials[1], credentials[0]) if credentials else {'checked': False},
               'full_audit': a.full_audit}
+    if a.include_sensitive:
+        result['sensitive'] = {'stream_uris': []}
     uri = None
     if a.video_test or a.full_audit or a.view_video or a.snapshot or credentials:
         if token:
@@ -311,7 +359,10 @@ def main():
                        f'<t:Transport><t:Protocol>RTSP</t:Protocol></t:Transport></m:StreamSetup>'
                        f'<m:ProfileToken>{token}</m:ProfileToken></m:GetStreamUri>')
             stream = call(media_url, request, a.timeout)
+            result['stream_uri_http_status'] = stream['status']
             uri = first_text(stream['root'], 'Uri') if stream['ok'] else None
+            if uri and a.include_sensitive:
+                result['sensitive']['stream_uris'].append(uri)
             result['anonymous_stream_uri'] = bool(uri)
             if uri:
                 result['rtsp_describe'] = rtsp_describe(uri, ip, a.timeout)
@@ -331,8 +382,12 @@ def main():
                        f'<m:ProfileToken>{escape(auth_token)}</m:ProfileToken></m:GetStreamUri>')
             auth_stream = call(media_url, request, a.timeout, credentials)
             auth_uri = first_text(auth_stream['root'], 'Uri') if auth_stream['ok'] else None
+            if auth_uri and a.include_sensitive and auth_uri not in result['sensitive']['stream_uris']:
+                result['sensitive']['stream_uris'].append(auth_uri)
             result['authenticated_stream_uri'] = bool(auth_uri)
             if auth_uri:
+                if result['rtsp_describe'] is None:
+                    result['rtsp_describe'] = rtsp_describe(auth_uri, ip, a.timeout)
                 result['authenticated_rtsp_describe'] = rtsp_describe(auth_uri, ip, a.timeout, credentials)
         if a.snapshot:
             if not a.snapshot.lower().endswith(('.jpg', '.jpeg')):
@@ -366,6 +421,7 @@ def main():
                 time.sleep(0.3)
             finally:
                 result['stop_accepted'] = call(ptz_url, stop, a.timeout)['ok']
+    result['security_assessment'] = assess_security(result)
     result['checklist'] = checklist(result)
     if a.report:
         with open(a.report, 'w', encoding='utf-8') as file:
