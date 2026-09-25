@@ -94,3 +94,7 @@ The entered password is assessed offline for length, predictable patterns and a 
 The main window keeps camera details, checks and the scrollable result console visible together. **Търсене и мрежа / Discovery and network** opens the LAN, port and nearby Wi-Fi tools in a separate window. Discovered camera addresses fill the main dashboard. The discovery window can be closed during a scan without breaking the controls.
 
 The status dot is yellow while a check or search is running, green when an ONVIF check succeeds or discovery finds entries, and red on errors or empty discovery. A remote host may close an individual TCP connection during a scan; other ports continue to be checked. Windows enforce minimum window sizes so action buttons remain visible. Exported HTML reports place a plain-language priority summary before the detailed checks and include `dev: dr.necrotix` at the bottom right.
+
+### Other IP cameras
+
+Use **Други IP камери (RTSP/HTTP) / Other IP cameras (RTSP/HTTP)** for a private-network device without ONVIF. Supply its HTTP and RTSP ports and, if known, the RTSP path from its own settings or manual. An empty RTSP path skips video testing. The app checks HTTP response and RTSP DESCRIBE with and without supplied credentials; it does not guess vendor stream paths, record video, or store the password or RTSP URL. Discovery marks protocol evidence as ONVIF, RTSP or HTTP. An HTTP service alone is not proof that the device is a camera.
