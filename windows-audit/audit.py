@@ -120,6 +120,55 @@ def wireless_information(device, timeout, credentials=None):
     return interfaces[:8], wireless[:8]
 
 
+def configuration_snapshot(device, timeout, credentials=None):
+    """Read a bounded allowlist of ONVIF settings; omit credential fields."""
+    operations = {
+        'network_protocols': 'GetNetworkProtocols',
+        'hostname': 'GetHostname',
+        'dns': 'GetDNS',
+        'ntp': 'GetNTP',
+        'device_time': 'GetSystemDateAndTime',
+        'discovery_mode': 'GetDiscoveryMode',
+        'password_policy': 'GetPasswordComplexityConfiguration',
+    }
+    snapshot = {}
+    for key, operation in operations.items():
+        response = call(device, f'<d:{operation} xmlns:d="{DEV}"/>', min(timeout, 2.5), credentials)
+        root = response['root'] if response['ok'] else None
+        if root is None:
+            snapshot[key] = {'status': 'unavailable', 'values': {}}
+            continue
+        values = {}
+        if key == 'network_protocols':
+            protocols = []
+            for node in root.iter():
+                if node.tag.endswith('}NetworkProtocols'):
+                    protocols.append({'name': (first_text(node, 'Name') or '')[:20],
+                                      'enabled': (first_text(node, 'Enabled') or '')[:8],
+                                      'ports': [(x.text or '')[:6] for x in node.iter() if x.tag.endswith('}Port')][:8]})
+            values['protocols'] = protocols[:12]
+        elif key == 'hostname':
+            values['name'] = (first_text(root, 'Name') or '')[:120]
+            values['from_dhcp'] = (first_text(root, 'FromDHCP') or '')[:8]
+        elif key in ('dns', 'ntp'):
+            values['from_dhcp'] = (first_text(root, 'FromDHCP') or '')[:8]
+            values['servers'] = list(dict.fromkeys((x.text or '')[:120] for x in root.iter()
+                          if x.tag.endswith(('}IPv4Address', '}IPv6Address', '}DNSname')) and x.text))[:12]
+        elif key == 'device_time':
+            values['timezone'] = (first_text(root, 'TZ') or '')[:60]
+            values['daylight_savings'] = (first_text(root, 'DaylightSavings') or '')[:8]
+            values['date_time_type'] = (first_text(root, 'DateTimeType') or '')[:20]
+        elif key == 'discovery_mode':
+            values['mode'] = (first_text(root, 'DiscoveryMode') or '')[:40]
+        elif key == 'password_policy':
+            for name in ('MinLen', 'Uppercase', 'Number', 'SpecialChars', 'BlockUsernameOccurrence'):
+                value = first_text(root, name)
+                if value is not None:
+                    values[name] = value[:20]
+        snapshot[key] = {'status': 'available', 'values': values}
+    return snapshot
+
+
 def profile_list(root):
     items = []
     if root is None:
@@ -319,6 +368,7 @@ def main():
                 credentials if auth_caps and auth_caps['ok'] else None)
     network_interfaces, wireless = wireless_information(
         device, a.timeout, credentials if auth_caps and auth_caps['ok'] else None)
+    configuration = configuration_snapshot(device, a.timeout, credentials if auth_caps and auth_caps['ok'] else None) if a.full_audit else {}
     profiles = call(media_url, f'<m:GetProfiles xmlns:m="{MEDIA}"/>', a.timeout)
     auth_profiles = call(media_url, f'<m:GetProfiles xmlns:m="{MEDIA}"/>', a.timeout, credentials) if credentials else None
     anonymous_items = profile_list(profiles['root']) if profiles['ok'] else []
@@ -337,6 +387,7 @@ def main():
               'device_information': {key: (first_text(info['root'], key) or '')[:120] for key in
                                      ('Manufacturer', 'Model', 'FirmwareVersion', 'SerialNumber', 'HardwareId')} if info['ok'] else {},
               'network_interfaces': network_interfaces, 'wireless_interfaces': wireless,
+              'configuration_snapshot': configuration,
               'movement_attempted': False, 'movement_accepted': None, 'stop_accepted': None,
               'anonymous_stream_uri': False, 'stream_uri_http_status': None, 'rtsp_describe': None, 'viewer_started': False,
               'authenticated': bool(credentials),
