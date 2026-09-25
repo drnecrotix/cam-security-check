@@ -406,8 +406,14 @@ class App:
                 report = {key: value for key, value in self.last_report.items() if key != 'sensitive'}
                 if confidential:
                     report['sensitive'] = {**self.last_report.get('sensitive', {}),
+                                           'collected': 'sensitive' in self.last_report,
                                            'username': self.report_username,
                                            'password': self.report_password}
+                    if not report['sensitive'].get('stream_uris'):
+                        messagebox.showinfo(
+                            self.say('Няма RTSP адрес', 'No RTSP URI'),
+                            self.say('Камерата не върна RTSP адрес или отметката е включена след последната проверка. Отчетът ще посочи причината. За нов опит пусни пълна проверка с отметката включена.',
+                                     'The camera returned no RTSP URI or the checkbox was enabled after the last check. The report will state the reason. For another attempt, run a full audit with the checkbox enabled.'))
                 content = (json.dumps(report, ensure_ascii=False, indent=2)
                            if path.lower().endswith('.json') else render_html(report, self.language.get()))
                 Path(path).write_text(content, encoding='utf-8')
@@ -924,6 +930,10 @@ class App:
         if report.get('device_information'):
             lines += ['', label('Информация за устройството:', 'Device information:')]
             lines.extend(f' - {key}: {value}' for key, value in report['device_information'].items() if value)
+        if report.get('wireless_interfaces'):
+            lines += ['', label('Wi-Fi от камерата:', 'Camera Wi-Fi:')]
+            lines.extend(f" - {item.get('interface') or '?'}: SSID {item.get('ssid') or '?'}"
+                         for item in report['wireless_interfaces'])
         return '\n'.join(summary + lines)
 
 
