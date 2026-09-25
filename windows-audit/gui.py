@@ -58,6 +58,10 @@ EN = {
     'Избери ONVIF потребител': 'Select ONVIF username',
     'Камерата върна няколко потребителя. Избери своя:': 'The camera returned several users. Select yours:',
     'Използвай': 'Use',
+    'Камера и достъп': 'Camera and access', 'Проверки': 'Checks',
+    'Резултат и конзола': 'Results and console', 'Търсене и мрежа': 'Discovery and network',
+    'Готово за проверка. Избери камера или въведи IP адрес.': 'Ready to check. Select a camera or enter its IP address.',
+    'Избери открит адрес от списъка, за да се попълни в главното табло.': 'Select a discovered address to fill the main dashboard.',
 }
 
 
@@ -67,6 +71,8 @@ def dark_style(root):
     style.theme_use('clam')
     style.configure('.', background=DARK['bg'], foreground=DARK['text'], font=('Segoe UI', 10))
     style.configure('TFrame', background=DARK['bg'])
+    style.configure('TLabelframe', background=DARK['bg'], bordercolor='#374555')
+    style.configure('TLabelframe.Label', background=DARK['bg'], foreground=DARK['accent'], font=('Segoe UI', 10, 'bold'))
     style.configure('TLabel', background=DARK['bg'], foreground=DARK['text'])
     style.configure('TButton', background=DARK['panel'], foreground=DARK['text'], padding=(10, 7), borderwidth=0)
     style.map('TButton', background=[('active', '#284457'), ('disabled', '#26303b')],
@@ -88,8 +94,8 @@ class App:
         self.language = tk.StringVar(value='BG')
         dark_style(root)
         root.title('Проверка на ONVIF камера')
-        root.geometry('860x710')
-        root.minsize(700, 600)
+        root.geometry('1080x760')
+        root.minsize(780, 610)
         self.ip = tk.StringVar()
         self.port = tk.StringVar(value='80')
         self.name = tk.StringVar()
@@ -100,28 +106,23 @@ class App:
         self.scan_ports = tk.StringVar(value=DEFAULT_PORTS)
         self.network = tk.StringVar()
         self.status = tk.StringVar(value='Въведи локалния IP адрес на твоята камера.')
+        self.discovery_window = None
+        self.scan_busy = False
+        self.scan_button = None
+        self.network_button = None
 
         shell = ttk.Frame(root, padding=18)
         shell.pack(fill='both', expand=True)
         header = ttk.Frame(shell)
-        header.pack(fill='x')
+        header.pack(fill='x', pady=(0, 12))
         ttk.Label(header, text='Проверка на собствена камера', font=('Segoe UI', 18, 'bold')).pack(side='left')
         ttk.Label(header, text='Език').pack(side='right', padx=(8, 0))
         language = ttk.Combobox(header, textvariable=self.language, values=['BG', 'EN'], width=4, state='readonly')
         language.pack(side='right')
         language.bind('<<ComboboxSelected>>', lambda event: self.apply_language())
-        ttk.Label(shell, text='Въведи локалния IP на камерата или намери камери в своята домашна мрежа.').pack(anchor='w', pady=(4, 16))
 
-        self.notebook = ttk.Notebook(shell)
-        self.notebook.pack(fill='both', expand=True)
-        self.camera_tab = ttk.Frame(self.notebook, padding=12)
-        self.discovery_tab = ttk.Frame(self.notebook, padding=12)
-        self.result_tab = ttk.Frame(self.notebook, padding=12)
-        self.notebook.add(self.camera_tab, text='Камери')
-        self.notebook.add(self.discovery_tab, text='Откриване')
-        self.notebook.add(self.result_tab, text='Резултат')
-        frame = self.camera_tab
-
+        frame = ttk.LabelFrame(shell, text='Камера и достъп', padding=12)
+        frame.pack(fill='x')
         saved = ttk.Frame(frame)
         saved.pack(fill='x', pady=(0, 10))
         ttk.Label(saved, text='Запазени камери').pack(anchor='w')
@@ -135,59 +136,91 @@ class App:
 
         fields = ttk.Frame(frame)
         fields.pack(fill='x')
-        ttk.Label(fields, text='IP адрес').grid(row=0, column=0, sticky='w')
-        ttk.Entry(fields, textvariable=self.ip, width=24).grid(row=1, column=0, sticky='ew', padx=(0, 12))
-        ttk.Label(fields, text='ONVIF порт').grid(row=0, column=1, sticky='w')
-        ttk.Entry(fields, textvariable=self.port, width=12).grid(row=1, column=1, sticky='w')
-        fields.columnconfigure(0, weight=1)
+        for col, label, var, width, hidden in [
+            (0, 'IP адрес', self.ip, 22, ''), (1, 'ONVIF порт', self.port, 10, ''),
+            (2, 'Име на камерата', self.name, 20, ''),
+            (3, 'ONVIF потребител', self.username, 18, ''),
+            (4, 'Парола (не се запазва)', self.password, 20, '*')]:
+            ttk.Label(fields, text=label).grid(row=0, column=col, sticky='w', padx=(0, 8))
+            ttk.Entry(fields, textvariable=var, width=width, show=hidden).grid(row=1, column=col, sticky='ew', padx=(0, 8))
+            fields.columnconfigure(col, weight=1 if col in (0, 2, 3, 4) else 0)
 
-        auth = ttk.Frame(frame)
-        auth.pack(fill='x', pady=(10, 0))
-        for column, label, var, show in [(0, 'Име на камерата', self.name, ''),
-                                         (1, 'ONVIF потребител', self.username, ''),
-                                         (2, 'Парола (не се запазва)', self.password, '*')]:
-            ttk.Label(auth, text=label).grid(row=0, column=column, sticky='w')
-            ttk.Entry(auth, textvariable=var, show=show).grid(row=1, column=column, sticky='ew', padx=(0, 8))
-            auth.columnconfigure(column, weight=1)
-        ttk.Button(frame, text='Открий ONVIF потребител', command=self.discover_username_only).pack(anchor='w', pady=(6, 0))
+        quick = ttk.Frame(shell)
+        quick.pack(fill='x', pady=(12, 8))
+        ttk.Button(quick, text='Търсене и мрежа', command=self.open_discovery).pack(side='left', padx=(0, 6))
+        ttk.Button(quick, text='Открий ONVIF потребител', command=self.discover_username_only).pack(side='left', padx=(0, 6))
+        ttk.Button(quick, text='Отдалечен достъп през Tailscale', command=self.remote_help).pack(side='left')
 
-        discover = ttk.Frame(self.discovery_tab)
-        discover.pack(fill='x', pady=(12, 0))
-        ttk.Label(discover, text='Портове за търсене (може да намалиш списъка за по-бърза проверка)').pack(anchor='w')
-        line = ttk.Frame(discover)
-        line.pack(fill='x')
+        actions = ttk.LabelFrame(shell, text='Проверки', padding=10)
+        actions.pack(fill='x')
+        self.buttons = []
+        for index, (label, flag) in enumerate([
+            ('Пълен отчет', '--full-audit'), ('Провери достъпа', None),
+            ('Провери видео', '--video-test'), ('Покажи видео във VLC', '--view-video'),
+            ('Снимка от видео', '--snapshot'), ('Тествай PTZ движение', '--move-test')]):
+            button = ttk.Button(actions, text=label, command=lambda f=flag: self.run(f))
+            button.grid(row=index // 3, column=index % 3, sticky='ew', padx=4, pady=4)
+            self.buttons.append(button)
+        for column in range(3):
+            actions.columnconfigure(column, weight=1)
+        ttk.Button(shell, text='Запази последния отчет', command=self.save_report).pack(anchor='e', pady=(8, 0))
+
+        console = ttk.LabelFrame(shell, text='Резултат и конзола', padding=8)
+        console.pack(fill='both', expand=True, pady=(8, 0))
+        self.output = tk.Text(console, wrap='word', height=12, state='disabled', font=('Consolas', 10),
+                              bg=DARK['field'], fg=DARK['text'], insertbackground=DARK['text'],
+                              selectbackground='#285d69', relief='flat', padx=12, pady=12)
+        scroll = ttk.Scrollbar(console, orient='vertical', command=self.output.yview)
+        self.output.configure(yscrollcommand=scroll.set)
+        scroll.pack(side='right', fill='y')
+        self.output.pack(side='left', fill='both', expand=True)
+        ttk.Label(shell, textvariable=self.status, wraplength=1000).pack(anchor='w', pady=(8, 0))
+        self.apply_language()
+        self.show(self.say('Готово за проверка. Избери камера или въведи IP адрес.',
+                           'Ready to check. Select a camera or enter its IP address.'))
+
+    def open_discovery(self):
+        if self.discovery_window and self.discovery_window.winfo_exists():
+            self.discovery_window.lift()
+            self.discovery_window.focus_set()
+            return
+        window = tk.Toplevel(self.root)
+        self.discovery_window = window
+        window.configure(bg=DARK['bg'])
+        window.title(self.say('Търсене и мрежа', 'Discovery and network'))
+        window.geometry('740x470')
+        window.minsize(560, 400)
+        box = ttk.Frame(window, padding=18)
+        box.pack(fill='both', expand=True)
+        ttk.Label(box, text='Портове за търсене (може да намалиш списъка за по-бърза проверка)').pack(anchor='w')
+        line = ttk.Frame(box)
+        line.pack(fill='x', pady=(4, 12))
         ttk.Entry(line, textvariable=self.scan_ports).pack(side='left', fill='x', expand=True, padx=(0, 8))
         self.scan_button = ttk.Button(line, text='Намери портове', command=self.start_scan)
         self.scan_button.pack(side='left')
-        network_line = ttk.Frame(discover)
-        network_line.pack(fill='x', pady=(8, 0))
-        ttk.Label(network_line, text='Локален адрес или CIDR').pack(side='left', padx=(0, 8))
-        ttk.Entry(network_line, textvariable=self.network).pack(side='left', fill='x', expand=True, padx=(0, 8))
-        self.network_button = ttk.Button(network_line, text='Намери камери', command=lambda: self.start_scan(True))
+        if self.scan_busy:
+            self.scan_button.configure(state='disabled')
+        ttk.Label(box, text='Локален адрес или CIDR').pack(anchor='w')
+        line = ttk.Frame(box)
+        line.pack(fill='x', pady=(4, 14))
+        ttk.Entry(line, textvariable=self.network).pack(side='left', fill='x', expand=True, padx=(0, 8))
+        self.network_button = ttk.Button(line, text='Намери камери', command=lambda: self.start_scan(True))
         self.network_button.pack(side='left')
-        ttk.Button(discover, text='Открий кабелната LAN мрежа', command=self.find_ethernet).pack(anchor='w', pady=(8, 0))
-        ttk.Button(discover, text='Отдалечен достъп през Tailscale', command=self.remote_help).pack(anchor='w', pady=(8, 0))
-        ttk.Button(discover, text='Видими Wi-Fi сигнали наблизо', command=self.wifi_signals).pack(anchor='w', pady=(4, 0))
-        ttk.Button(discover, text='Открий устройства и ONVIF камери', command=self.discover_devices).pack(anchor='w', pady=(8, 0))
-
-        buttons = ttk.Frame(frame)
-        buttons.pack(fill='x', pady=(18, 12))
-        self.buttons = []
-        for label, flag in [('Пълен отчет', '--full-audit'), ('Провери достъпа', None), ('Провери видео', '--video-test'),
-                            ('Покажи видео във VLC', '--view-video'), ('Снимка от видео', '--snapshot'),
-                            ('Тествай PTZ движение', '--move-test')]:
-            button = ttk.Button(buttons, text=label, command=lambda f=flag: self.run(f))
-            button.pack(fill='x', pady=3)
-            self.buttons.append(button)
-        ttk.Button(buttons, text='Запази последния отчет', command=self.save_report).pack(fill='x', pady=3)
-
-        ttk.Label(shell, textvariable=self.status, wraplength=780).pack(anchor='w', pady=(12, 8))
-        self.output = tk.Text(self.result_tab, wrap='word', height=14, state='disabled', font=('Consolas', 10),
-                              bg=DARK['field'], fg=DARK['text'], insertbackground=DARK['text'],
-                              selectbackground='#285d69', relief='flat', padx=12, pady=12)
-        self.output.pack(fill='both', expand=True)
-        ttk.Label(self.result_tab, text='За видео е нужен VLC, а за снимка - FFmpeg. Паролата не се записва. При PTZ тест камерата може да се премести за кратко.',
-                  wraplength=740).pack(anchor='w', pady=(10, 0))
+        if self.scan_busy:
+            self.network_button.configure(state='disabled')
+        for label, command in [
+            ('Открий кабелната LAN мрежа', self.find_ethernet),
+            ('Открий устройства и ONVIF камери', self.discover_devices),
+            ('Видими Wi-Fi сигнали наблизо', self.wifi_signals)]:
+            ttk.Button(box, text=label, command=command).pack(fill='x', pady=4)
+        ttk.Label(box, text='Избери открит адрес от списъка, за да се попълни в главното табло.',
+                  wraplength=670).pack(anchor='w', pady=(14, 0))
+        def close():
+            self.scan_button = None
+            self.network_button = None
+            self.discovery_window = None
+            window.destroy()
+        window.protocol('WM_DELETE_WINDOW', close)
         self.apply_language()
 
     def tr(self, text):
@@ -211,8 +244,6 @@ class App:
             for child in widget.winfo_children():
                 visit(child)
         visit(self.root)
-        for index, bg in enumerate(('Камери', 'Откриване', 'Резултат')):
-            self.notebook.tab(index, text=self.tr(bg))
         if self.last_report:
             self.show(self.format_report(self.last_report))
 
@@ -477,7 +508,6 @@ class App:
                 self.ip.set(ip)
                 self.port.set(port)
                 self.status.set(f'ONVIF: {ip}:{port}')
-            self.notebook.select(self.camera_tab)
             window.destroy()
         ttk.Button(box, text='Use selected' if english else 'Използвай избраното', command=choose).pack(anchor='e', pady=(8, 0))
         self.status.set(f'{len(rows)} ' + ('entries found.' if english else 'записа са открити.'))
@@ -564,8 +594,11 @@ class App:
         except ValueError as error:
             messagebox.showerror(self.say('Невалиден адрес или портове', 'Invalid address or ports'), str(error))
             return
-        self.scan_button.configure(state='disabled')
-        self.network_button.configure(state='disabled')
+        self.scan_busy = True
+        if self.scan_button and self.scan_button.winfo_exists():
+            self.scan_button.configure(state='disabled')
+        if self.network_button and self.network_button.winfo_exists():
+            self.network_button.configure(state='disabled')
         self.status.set(self.say(f'Търся услуги на {len(addresses)} адреса и {len(ports)} порта. Това може да отнеме около минута...',
                                  f'Checking {len(addresses)} addresses and {len(ports)} ports. This may take about a minute...'))
         threading.Thread(target=self.scan_worker, args=(addresses, ports), daemon=True).start()
@@ -579,13 +612,19 @@ class App:
             self.root.after(0, lambda: self.scan_failed(message))
 
     def scan_failed(self, message):
-        self.scan_button.configure(state='normal')
-        self.network_button.configure(state='normal')
+        self.scan_busy = False
+        if self.scan_button and self.scan_button.winfo_exists():
+            self.scan_button.configure(state='normal')
+        if self.network_button and self.network_button.winfo_exists():
+            self.network_button.configure(state='normal')
         self.status.set(self.say('Търсенето не успя: ', 'Discovery failed: ') + message)
 
     def show_scan(self, results):
-        self.scan_button.configure(state='normal')
-        self.network_button.configure(state='normal')
+        self.scan_busy = False
+        if self.scan_button and self.scan_button.winfo_exists():
+            self.scan_button.configure(state='normal')
+        if self.network_button and self.network_button.winfo_exists():
+            self.network_button.configure(state='normal')
         self.status.set(self.say(f'Открити отворени портове: {len(results)}. Непозната услуга не доказва, че устройството е камера.',
                                  f'Open ports found: {len(results)}. An unknown service does not identify a camera.'))
         window = tk.Toplevel(self.root)
@@ -651,7 +690,7 @@ class App:
             if not destination:
                 return
         self.status.set(self.say('Проверявам камерата...', 'Checking camera...'))
-        self.show(self.say('Свързване...', 'Connecting...'))
+        self.show(self.say('Свързване и проверка на камерата...\nРезултатът ще се появи тук.', 'Connecting and checking the camera...\nThe result will appear here.'))
         for button in self.buttons:
             button.configure(state='disabled')
         args = [sys.executable, str(Path(__file__).with_name('audit.py')), str(ip), '--port', str(port)]
@@ -685,7 +724,6 @@ class App:
         self.last_report = report
         self.show(self.format_report(report) if report else result)
         self.status.set('Audit finished.' if self.language.get() == 'EN' else 'Проверката приключи.')
-        self.notebook.select(self.result_tab)
         for button in self.buttons:
             button.configure(state='normal')
 
