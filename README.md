@@ -1,53 +1,181 @@
+<p align="center">
+  <img src="https://cdn-icons-png.flaticon.com/512/394/394620.png" width="120" height="120" alt="Camera security check">
+</p>
+
+<h1 align="center">cam-security-check</h1>
 
 <p align="center">
-<img src="https://cdn-icons-png.flaticon.com/512/394/394620.png", width="300", height="300">
+  Check <strong>your own</strong> IP cameras on a private LAN for anonymous ONVIF / RTSP exposure.<br>
+  Dark bilingual (BG/EN) Windows dashboard, HTML reports, optional PTZ / video tests.
 </p>
-<h1 align="center"> DEDSEC_PTZ_EXPLOIT</h1>
-<h4 align="center">DEDSEC_PTZ_EXPLOIT is a vulnerability that allows unauthorized control of an IP camera using the ONVIF protocol, The provided proof-of-concept code is capable of controlling camera movement without the need for a username and password.</h4>
 
-## DESCRIPTION
-PTZ is stands for Pan, Tilt, and Zoom, and it refers to the capabilities of a type of camera commonly known as a PTZ camera. These cameras are designed for remote control over their movement and focus. Here's what each component of PTZ represents:
+<p align="center">
+  <a href="windows-audit/README.md">Windows audit docs</a>
+  ·
+  <a href="#disclaimer">Disclaimer</a>
+  ·
+  <a href="https://github.com/drnecrotix">dr.necrotix</a>
+</p>
 
-- Pan: This refers to the horizontal movement of the camera. A PTZ camera can rotate left and right, allowing it to cover a wide area without physically moving the camera itself.
+---
 
-- Tilt: Tilt refers to the vertical movement of the camera. A PTZ camera can tilt up and down, enabling it to change its viewing angle and cover a range of vertical angles.
+## What this repository is
 
-- Zoom: Zoom refers to the camera's ability to change its focal length, making objects appear closer or farther away. PTZ cameras often come with optical zoom capabilities, allowing them to capture distant subjects with clarity.
+Two related pieces:
 
-PTZ cameras are commonly used for surveillance, video conferencing, and live event coverage, as they offer the flexibility to adjust the camera's view remotely. This makes them particularly useful in situations where you need to monitor or capture different parts of a scene without physically repositioning the camera.
+| Path | What it is |
+| --- | --- |
+| [`windows-audit/`](windows-audit/) | **Primary tool.** Source-available Windows GUI + CLI. Python 3.10+, no third-party packages. Discovers cameras on a network you control, compares anonymous vs authenticated ONVIF, checks RTSP, exports HTML/JSON. |
+| `dedsec_ptz_exploit` | Legacy Linux binary from the upstream [DEDSEC_PTZ_EXPLOIT](https://github.com/0xbitx/DEDSEC_PTZ_EXPLOIT) PoC. Not a Windows build of the audit tool. Use only on devices you own or are authorized to test. |
 
-DEDSEC_PTZ_EXPLOIT is a exploit tool with the ability to send meticulously crafted code, enabling it to gain control over the target camera's movements and execute PTZ (Pan, Tilt, Zoom) commands seamlessly, all accomplished without the necessity of a username and password. This tool empowers users to manipulate camera functions and surveillance angles with precision, making it a valuable asset in various applications such as security, monitoring, and remote control scenarios.
+This project is a **diagnostic** for cameras you administer. It is not a scanning service for the public Internet and it is not a password-guessing toolkit.
 
-## Star History
+---
 
-[![Star History Chart](https://api.star-history.com/svg?repos=0xbitx/DEDSEC_PTZ_EXPLOIT&type=Date)](https://star-history.com/#0xbitx/DEDSEC_PTZ_EXPLOIT&Date)
+## Preview
 
+Dashboard (BG) with discovery and open services:
 
-## Windows camera audit
+![Windows dashboard — Bulgarian UI, discovery and open services](docs/Assets/Screenshot%202026-09-26%20021555.png)
 
-A separate, source-available Windows tool is in [`windows-audit/`](windows-audit/README.md). It checks one private camera IP or a bounded local network for ONVIF/RTSP ports, tests anonymous PTZ and video access, and can open a confirmed stream in VLC. Install Python 3, open `windows-audit/START-WINDOWS.bat`, and use it only on devices you own or are authorized to assess. This is an independent diagnostic implementation, not a Windows build of the Linux executable.
+Same dashboard in English:
 
-## INSTALLATION 
-    * git clone https://github.com/0xbitx/DEDSEC_PTZ_EXPLOIT.git
-    * cd DEDSEC_PTZ_EXPLOIT
-    * pip3 install tabulate progressbar2
-    * chmod +x dedsec_ptz_exploit
-    * ./dedsec_ptz_exploit
+![Windows dashboard — English UI](docs/Assets/Screenshot%202026-09-26%20021809.png)
 
-### TESTED ON FOLLOWING
-* Kali Linux 
-* Parrot OS 
-* Ubuntu
-  
-### TESTED ON FOLLOWING 
-* [cctv camera](https://shopee.ph/Hamrol-5MP-Auto-Tracking-PTZ-Wifi-IP-Camera-Outdoor-3MP-2MP-1080P-4X-Zoom-Wireless-CCTV-Security-Camera-i.168686662.5428037998?sp_atk=414e3dca-618b-4127-b2de-19c6e4be15ac&xptdk=414e3dca-618b-4127-b2de-19c6e4be15ac) Onvif protocol 
+Exported HTML report — checks, risk, actions (sensitive fields redacted in this screenshot):
 
-## Support
+![HTML audit report with checks and evidence](docs/Assets/Screenshot%202026-09-26%20022019.png)
 
-If you find my work helpful and want to support me, consider making a donation. Your contribution will help me continue working on open-source projects.
+---
 
-**Bitcoin Address: `36ALguYpTgFF3RztL4h2uFb3cRMzQALAcm`**
+## Windows camera audit (recommended)
 
-<h1 align="center"> DISCLAIMER </h1>
+Requirements:
 
-<h4 align="center">I'm not responsible for anything you do with this program, so please only use it for good and educational purposes. </h4>
+- Windows 10/11
+- [Python 3.10+](https://www.python.org/downloads/windows/) with the **py** launcher
+- Optional: [VLC](https://www.videolan.org/vlc/) to view a confirmed stream
+- Optional: FFmpeg on `PATH` for snapshot fallback
+
+### Start the GUI
+
+```text
+1. Install Python 3 for Windows.
+2. Open windows-audit/START-WINDOWS.bat
+3. Enter a private camera IP and ONVIF port.
+4. Use Full audit / Check access / Check video.
+```
+
+Or from PowerShell in `windows-audit/`:
+
+```powershell
+py -3 gui.py
+```
+
+Switch **BG / EN** in the top right. Saved cameras keep IP, port and username — **passwords are never stored** in the inventory.
+
+### What the GUI can do
+
+- Save named cameras and run a full ONVIF + RTSP audit
+- Discover ports on one IP (bounded list / short range, max 32 ports)
+- Find cameras on a private `/24` you control (capped scan)
+- Detect the wired Ethernet LAN prefix
+- Combine TCP check + ONVIF WS-Discovery + neighbor table
+- Compare anonymous vs authenticated capabilities / profiles / PTZ status / stream URI
+- Offline password *heuristic* (length, patterns, common values) — **no guessing against the camera**
+- Snapshot via ONVIF JPEG (or anonymous RTSP + FFmpeg)
+- Open a stream in VLC only after an anonymous `RTSP/1.0 200` DESCRIBE
+- Export HTML (bilingual in one file) or JSON
+- Optional confidential export that includes stream URLs / the password currently typed — treat that file as a secret
+- Notes for Tailscale subnet routing so you can reach a home LAN without publishing ONVIF/RTSP to the Internet
+
+Full behavior, result fields and limits: [`windows-audit/README.md`](windows-audit/README.md).
+
+### CLI examples
+
+Replace IP and port with **your** camera.
+
+```powershell
+py -3 audit.py 192.168.1.50 --port 80
+py -3 audit.py 192.168.1.50 --port 80 --video-test
+py -3 audit.py 192.168.1.50 --port 80 --view-video
+```
+
+`--move-test` sends a short opt-in PTZ command (0.3s + Stop). Watch the camera, keep the view clear, and run it only on hardware you are allowed to move.
+
+```powershell
+py -3 audit.py 192.168.1.50 --port 80 --move-test
+```
+
+### Tests
+
+```powershell
+cd windows-audit
+python -m unittest discover -s tests -v
+```
+
+---
+
+## Interpreting a result (short)
+
+| Signal | Meaning |
+| --- | --- |
+| Anonymous capabilities / profiles | Info leaked without login. Not proof of PTZ control. |
+| Anonymous PTZ status | Position/status readable without login. |
+| `movement_accepted` | Camera accepted a move SOAP reply. Confirm physically. |
+| Anonymous stream URI | ONVIF handed back an address. Not proof the video plays. |
+| `RTSP/1.0 200` DESCRIBE | Server accepted anonymous describe. Playback in VLC confirms view. |
+| HTTP 401 / 403 | Auth required for that request (or wrong path/port). |
+
+A failed or unreachable check is **not** a full penetration test.
+
+If anonymous PTZ or video is exposed: update firmware, force ONVIF authentication, disable unused ONVIF, keep ports off the public Internet, restrict the LAN, change default credentials.
+
+---
+
+## Linux binary (legacy)
+
+Tested by upstream on Kali, Parrot and Ubuntu. Clone **this** repo if you are working from here:
+
+```bash
+git clone https://github.com/drnecrotix/cam-security-check.git
+cd cam-security-check
+pip3 install tabulate progressbar2
+chmod +x dedsec_ptz_exploit
+./dedsec_ptz_exploit
+```
+
+This executable is independent of `windows-audit/`. Do not treat it as the Windows GUI.
+
+---
+
+## Scope and limits
+
+- Private IPv4 / local routed subnets you control. Do not point it at random public hosts.
+- Discovery is bounded (ports, host count, check count) so a home LAN scan stays finite.
+- Auth support: ONVIF WS-Security UsernameToken digest or HTTP Digest. Other vendor schemes may need an adapter.
+- The tool does not brute-force accounts, guess vendor RTSP paths, or record video by default.
+- Open HTTP/RTSP ports do not by themselves prove a device is a camera.
+
+---
+
+<a id="disclaimer"></a>
+
+## Disclaimer
+
+Use this software only on cameras and networks you **own** or have **written authorization** to assess.
+
+Unauthorized access to cameras, streams or PTZ control is illegal. The authors are not responsible for misuse. Educational and defensive use only.
+
+Do not publish confidential HTML/JSON exports. They can contain stream URLs and credentials.
+
+---
+
+## License
+
+See [`LICENSE`](LICENSE).
+
+## Credits
+
+- Windows diagnostic: [dr.necrotix](https://github.com/drnecrotix) / NecrotixLab
+- Upstream Linux PoC: [0xbitx/DEDSEC_PTZ_EXPLOIT](https://github.com/0xbitx/DEDSEC_PTZ_EXPLOIT)
