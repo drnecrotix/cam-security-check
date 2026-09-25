@@ -13,5 +13,7 @@ def nearby_networks():
     output = result.stdout.decode(f'cp{codepage}', errors='replace').strip()
     error = result.stderr.decode(f'cp{codepage}', errors='replace').strip()
     if result.returncode != 0:
+        if 'wlansvc' in (error + output).lower() or 'wireless autoconfig' in (error + output).lower():
+            raise RuntimeError('Windows Wireless AutoConfig (WlanSvc) не работи. Провери дали компютърът има включен Wi-Fi адаптер; само Ethernet връзка не може да сканира Wi-Fi сигнали.')
         raise RuntimeError(error or output or 'Неуспешно търсене на Wi-Fi мрежи.')
     return output or 'Не са открити видими Wi-Fi мрежи.'

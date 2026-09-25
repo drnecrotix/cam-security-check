@@ -95,6 +95,25 @@ def profile_list(root):
     return items
 
 
+def discover_usernames(ip, port, timeout=4):
+    """Read an anonymously exposed ONVIF user list; never guess usernames."""
+    address = ipaddress.ip_address(ip)
+    if (address.version != 4 or not address.is_private or address.is_loopback or
+            address.is_link_local or address.is_reserved or not 1 <= int(port) <= 65535):
+        raise ValueError('Only a private camera IPv4 address and valid port are allowed.')
+    response = call(f'http://{address}:{port}/onvif/device_service',
+                    f'<d:GetUsers xmlns:d="{DEV}"/>', timeout)
+    if not response['ok'] or response['root'] is None:
+        return []
+    names = []
+    for node in response['root'].iter():
+        if node.tag.endswith('}User'):
+            name = first_text(node, 'Username')
+            if name and name not in names:
+                names.append(name)
+    return names
+
+
 def service_url(root, service, fallback, ip):
     if root is not None:
         for node in root.iter():

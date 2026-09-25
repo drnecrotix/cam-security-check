@@ -58,11 +58,11 @@ def check(ip, port):
 
 
 def scan_hosts(addresses, ports):
-    if len(addresses) > 64 or len(ports) > 32 or len(addresses) * len(ports) > 512:
-        raise ValueError('Най-много 64 адреса, 32 порта и 512 проверки наведнъж.')
+    if len(addresses) > 254 or len(ports) > 32 or len(addresses) * len(ports) > 2048:
+        raise ValueError('Най-много 254 адреса, 32 порта и 2048 проверки наведнъж.')
 
     results = []
-    with ThreadPoolExecutor(max_workers=32) as executor:
+    with ThreadPoolExecutor(max_workers=64) as executor:
         for future in as_completed([executor.submit(check, ip, p) for ip in addresses for p in ports]):
             result = future.result()
             if result:
