@@ -12,13 +12,15 @@ Give the camera a name and press **Запази** to keep its IP, port and ONVIF
 
 If you do not know the ONVIF port, enter the camera's IP and press **Намери портове**. It checks the listed ports on that one IP and displays ONVIF, RTSP, or unknown open services. You can edit the comma-separated port list or use a short range such as `8000-8010`; the total is limited to 32 ports. Select an ONVIF result to fill the ONVIF port. An open port or authentication response is not proof of a particular vulnerability.
 
-If you do not know the camera IP, enter an **explicit private CIDR network** such as `192.168.1.0/26` and press **Намери IP адреси**. The result lists IP, port, and service; choosing an ONVIF row fills both fields. A search is capped at 64 addresses and 512 IP/port checks. The tool does not determine your network automatically. Check your router's LAN range before entering it and scan only networks you control.
+If you do not know the camera IP, enter a local address such as `192.168.0.1` and press **Намери камери**. The tool assumes `/24` for a bare address; you can enter the actual network such as `192.168.0.0/24` instead. The result lists IP, port, and service; choosing an ONVIF row fills both fields. A search is capped at 254 addresses and 2048 IP/port checks and can take a while. Check your router's actual LAN range and scan only networks you control. A public router WAN address is not the camera's local address.
+
+For a desktop connected by Ethernet, press **Открий кабелната LAN мрежа**. Windows reports the active physical Ethernet adapters and IPv4 prefixes. Select the home network, then press **Намери камери**. A Wi-Fi adapter is not required. This lists open ports and recognized ONVIF/RTSP services; a router or another device can also have an open port, so an open port alone does not identify a camera.
 
 ## Away from home: Tailscale subnet routing
 
 The **Отдалечен достъп през Tailscale** button explains how to use a computer that stays on at home as a subnet router. Install Tailscale on that home Windows PC, sign in, and run the generated `tailscale up --advertise-routes=...` command there from an Administrator PowerShell. Approve the route in Tailscale's admin console. Install Tailscale and sign into the same account on the Windows computer you use away from home. Then scan the home network through the existing interface. This requires a working home computer and connection; it cannot locate cameras over the Internet without a route to your home network. Do not expose ONVIF or RTSP ports directly to the Internet.
 
-The route can be the complete home LAN (for example `/24`), while each discovery search remains limited to 64 addresses. Search four `/26` portions of a `/24` separately. Official setup: https://tailscale.com/docs/use-cases/personal-or-at-home-use/access-devices-without-tailscale?tab=windows
+The route can be the complete home LAN (for example `/24`), and discovery can search the same `/24` after the tunnel is connected. Official setup: https://tailscale.com/docs/use-cases/personal-or-at-home-use/access-devices-without-tailscale?tab=windows
 
 ## Nearby Wi-Fi signals without joining a network
 
