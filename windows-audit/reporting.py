@@ -123,7 +123,7 @@ def _add_password(items, add, report):
 
 
 
-def render_html(report, lang='bg'):
+def _render_localized(report, lang='bg'):
     en = lang.lower().startswith('en')
     label = lambda bg, english: english if en else bg
     items = report.get('checklist') or checklist(report)
@@ -142,6 +142,25 @@ def render_html(report, lang='bg'):
                            for item in report.get('network_interfaces') or [])
     wireless_rows = ''.join(f'<tr><td>{escape(str(item.get("interface") or "?"))}</td><td>{escape(str(item.get("ssid") or "?"))}</td><td>{escape(str(item.get("bssid") or "?"))}</td><td>{escape(str(item.get("signal") or "?"))}</td></tr>'
                             for item in report.get('wireless_interfaces') or [])
+    config_labels = {
+        'network_protocols': ('Мрежови протоколи', 'Network protocols'),
+        'hostname': ('Име в мрежата', 'Hostname'), 'dns': ('DNS', 'DNS'),
+        'ntp': ('Сървъри за време', 'Time servers'),
+        'device_time': ('Час и часова зона', 'Time and time zone'),
+        'discovery_mode': ('Режим на откриване', 'Discovery mode'),
+        'password_policy': ('Правила за пароли', 'Password policy'),
+    }
+    settings = report.get('configuration_snapshot') or {}
+    def setting_value(value):
+        if isinstance(value, list):
+            return ', '.join(setting_value(item) for item in value) or '-'
+        if isinstance(value, dict):
+            return '; '.join(f'{key}: {setting_value(item)}' for key, item in value.items() if item not in ('', None, [])) or '-'
+        return str(value)
+    setting_rows = ''.join(
+        f'<tr><th>{escape(label(*config_labels.get(key, (key, key))))}</th>'
+        f'<td>{escape(setting_value(item.get("values") or {})) if item.get("status") == "available" else escape(label("Не е предоставено", "Not provided"))}</td></tr>'
+        for key, item in settings.items())
     sensitive = report.get('sensitive') or {}
     missing = label('Не са въведени при проверката', 'Not supplied for this check')
     private_rows = ''.join(f'<tr><th>{escape(key)}</th><td>{escape(str(value if value is not None else missing))}</td></tr>'
@@ -178,8 +197,38 @@ def render_html(report, lang='bg'):
 <h2>{label('Информация за устройството', 'Device information')}</h2><table>{info_rows or '<tr><td>' + label('Не е предоставена', 'Not provided') + '</td></tr>'}</table>
 <h2>{label('Мрежови интерфейси', 'Network interfaces')}</h2><table><tr><th>{label('Име', 'Name')}</th><th>MAC</th><th>IP</th></tr>{network_rows or '<tr><td colspan="3">' + label('Не са предоставени', 'Not provided') + '</td></tr>'}</table>
 <h2>{label('Wi-Fi данни от камерата', 'Camera Wi-Fi data')}</h2><table><tr><th>{label('Интерфейс', 'Interface')}</th><th>SSID</th><th>BSSID</th><th>{label('Сигнал', 'Signal')}</th></tr>{wireless_rows or '<tr><td colspan="4">' + label('Камерата не предостави Wi-Fi статус през ONVIF. Това не означава, че няма Wi-Fi.', 'The camera did not provide Wi-Fi status over ONVIF. This does not mean it has no Wi-Fi.') + '</td></tr>'}</table>
+<h2>{label('Достъпни настройки на камерата', 'Available camera settings')}</h2><p class="muted">{label('Показани са само настройки, върнати от използваните ONVIF заявки. Фабрични, частни за производителя и тайни настройки не могат да бъдат извлечени от този отчет.', 'Only settings returned by these ONVIF requests are shown. Vendor-specific and secret settings are outside this report.')}</p><table>{setting_rows or '<tr><td>' + label('Изпълни Пълен отчет за четене на настройки. Камера без ONVIF не предоставя този раздел.', 'Run Full audit to read settings. A non-ONVIF camera does not provide this section.') + '</td></tr>'}</table>
 {private_section}
 <h2>{label('Проверки и доказателства', 'Checks and evidence')}</h2><table><thead><tr><th>{label('Проверка', 'Check')}</th><th>{label('Резултат', 'Result')}</th><th>{label('Риск', 'Risk')}</th><th>{label('Наблюдение', 'Observation')}</th><th>{label('Какво да подобриш', 'Action')}</th></tr></thead><tbody>{rows}</tbody></table>
 <h2>{label('Видео профили', 'Video profiles')}</h2><table><tr><th>{label('Име', 'Name')}</th><th>{label('Резолюция', 'Resolution')}</th><th>{label('Кодек', 'Codec')}</th></tr>{profile_rows or '<tr><td colspan="3">' + label('Няма получени профили', 'No profiles received') + '</td></tr>'}</table>
 <p class="muted">{label('RTSP DESCRIBE 200 не доказва възпроизвеждане. Отрицателен тест не доказва пълна защита. Паролата се оценява локално и не се записва.', 'RTSP DESCRIBE 200 does not prove playback. A negative test does not prove complete security. Password assessment is local and the password is not saved.')}</p>
+<p class="support"><a href="https://necrotixlab.com/services" target="_blank" rel="noopener noreferrer">{label('Заяви Поддръжка', 'Request Support')}</a></p>
 <footer>dev: <a href="https://necrotixlab.com/services" target="_blank" rel="noopener noreferrer">dr.necrotix</a></footer></html>'''
+
+
+def render_html(report, lang='bg'):
+    """One self-contained HTML report with an in-page BG/EN switch."""
+    initial = 'en' if lang.lower().startswith('en') else 'bg'
+    parts = {}
+    style = ''
+    for language in ('bg', 'en'):
+        page = _render_localized(report, language)
+        if not style:
+            style = page.split('<style>', 1)[1].split('</style>', 1)[0]
+        parts[language] = page.split('</style>', 1)[1].rsplit('</html>', 1)[0]
+    return (f'<!doctype html><html lang="{initial}"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+            f'<title>CCTV report / CCTV отчет</title><style>{style}'
+            '.language-panel[hidden]{display:none!important}.language-switch{display:flex;gap:8px;justify-content:flex-end;margin:0 0 18px}'
+            '.language-switch button{background:#1b2532;color:#e8eef5;border:1px solid #35b7a8;border-radius:6px;padding:8px 14px;cursor:pointer}'
+            '.language-switch button[aria-pressed="true"]{background:#35b7a8;color:#10151e}'
+            '.support{text-align:center;margin:30px 0}.support a{display:inline-block;background:#35b7a8;color:#10151e;font-weight:700;text-decoration:none;border-radius:7px;padding:12px 22px}'
+            '</style><nav class="language-switch" aria-label="Language / Език">'
+            f'<button type="button" data-language="bg" aria-pressed="{str(initial == "bg").lower()}">BG</button>'
+            f'<button type="button" data-language="en" aria-pressed="{str(initial == "en").lower()}">EN</button></nav>'
+            f'<main id="report-bg" class="language-panel" {"hidden" if initial != "bg" else ""}>{parts["bg"]}</main>'
+            f'<main id="report-en" class="language-panel" {"hidden" if initial != "en" else ""}>{parts["en"]}</main>'
+            '<script>document.querySelectorAll("[data-language]").forEach(function(button){button.addEventListener("click",function(){'
+            'var language=button.getAttribute("data-language");document.documentElement.lang=language;'
+            'document.querySelectorAll(".language-panel").forEach(function(panel){panel.hidden=panel.id!=="report-"+language});'
+            'document.querySelectorAll("[data-language]").forEach(function(item){item.setAttribute("aria-pressed",String(item===button))})'
+            '})})</script></html>')
