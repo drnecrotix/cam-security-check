@@ -4,6 +4,7 @@ import argparse
 import getpass
 import ipaddress
 import json
+import socket
 import sys
 import urllib.error
 import urllib.request
@@ -25,6 +26,19 @@ def http_check(ip, port, timeout):
         return None
 
 
+def rtsp_options(ip, port, timeout):
+    """Read a bounded RTSP service response without assuming vendor stream paths."""
+    try:
+        with socket.create_connection((str(ip), port), timeout=timeout) as connection:
+            connection.settimeout(timeout)
+            connection.sendall(f'OPTIONS rtsp://{ip}:{port}/ RTSP/1.0\r\nCSeq: 1\r\nUser-Agent: LocalCameraAudit/1.0\r\n\r\n'.encode('ascii'))
+            data = connection.recv(4096).decode('latin-1', 'replace')
+        line = data.split('\r\n', 1)[0]
+        return line[:120] if line.startswith('RTSP/') else 'invalid_response'
+    except OSError:
+        return None
+
+
 def run(ip, http_port, rtsp_port, rtsp_path, timeout, credentials=None, include_sensitive=False):
     address = ipaddress.ip_address(ip)
     if (address.version != 4 or not address.is_private or address.is_loopback or
@@ -36,11 +50,13 @@ def run(ip, http_port, rtsp_port, rtsp_path, timeout, credentials=None, include_
                       any(c in rtsp_path for c in '\r\n?#@') or '..' in rtsp_path):
         raise ValueError('RTSP path must start with / and contain no query, credentials or traversal.')
     http_status = http_check(address, http_port, timeout)
+    rtsp_service = rtsp_options(address, rtsp_port, timeout)
     uri = f'rtsp://{address}:{rtsp_port}{rtsp_path}' if rtsp_path else None
     anonymous = rtsp_describe(uri, address, timeout) if uri else None
     authenticated = rtsp_describe(uri, address, timeout, credentials) if uri and credentials else None
     result = {'target': str(address), 'port': http_port, 'camera_type': 'RTSP/HTTP (non-ONVIF)',
               'http_status_generic': http_status, 'rtsp_port': rtsp_port, 'rtsp_path_supplied': bool(rtsp_path),
+              'rtsp_options': rtsp_service,
               'rtsp_describe': anonymous, 'authenticated_rtsp_describe': authenticated,
               'authenticated': bool(credentials),
               'password_assessment': assess(credentials[1], credentials[0]) if credentials else {'checked': False},
