@@ -2,7 +2,7 @@
   <img src="https://cdn-icons-png.flaticon.com/512/394/394620.png" width="120" height="120" alt="Camera security check">
 </p>
 
-<h1 align="center">cam-security-check</h1>
+<h1 align="center">Cam Security Check [For educational purposes only]</h1>
 
 <p align="center">
   Check <strong>your own</strong> IP cameras on a private LAN for anonymous ONVIF / RTSP exposure.<br>
@@ -42,7 +42,7 @@ This project is a **diagnostic** for cameras you administer. It is not a scannin
 <p align="center">
   <img src="docs/Assets/Screenshot%202026-09-26%20021809.png" alt="Windows dashboard — English UI" width="900">
 </p>
-<p align="center"><em>Same dashboard in English</em></p>
+<p align="center"><em>Detailed CCTV report - the entire document is not shown in the image.</em></p>
 
 <p align="center">
   <img src="docs/Assets/Screenshot%202026-09-26%20022019.png" alt="HTML audit report with checks and evidence" width="900">
