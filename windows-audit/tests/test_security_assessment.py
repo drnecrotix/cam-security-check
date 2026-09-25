@@ -7,6 +7,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from security_assessment import assess
 from generic_camera import run
 from reporting import render_html
+from audit import split_stream_credentials
+import ipaddress
 
 
 class SecurityAssessmentTests(unittest.TestCase):
@@ -28,10 +30,26 @@ class SecurityAssessmentTests(unittest.TestCase):
         self.assertEqual(result['counts']['unknown'], 0)
 
     def test_generic_no_path_is_unknown(self):
-        with patch('generic_camera.http_check', return_value=200):
+        with patch('generic_camera.http_check', return_value=200), patch('generic_camera.rtsp_options', return_value='RTSP/1.0 200 OK'):
             report = run('192.168.1.7', 80, 554, '', 1)
         self.assertEqual(report['security_assessment']['rating'], 'insufficient_data')
+        self.assertEqual(report['rtsp_options'], 'RTSP/1.0 200 OK')
         self.assertEqual(next(t for t in report['security_assessment']['tests'] if t['key'] == 'rtsp')['status'], 'unknown')
+
+    def test_full_audit_checks_reported_https_configuration(self):
+        report = {'full_audit': True, 'configuration_snapshot': {
+            'network_protocols': {'status': 'available', 'values': {'protocols': [
+                {'name': 'HTTPS', 'enabled': 'false', 'ports': ['443']}]}},
+            'discovery_mode': {'status': 'available', 'values': {'mode': 'Discoverable'}}}}
+        result = assess(report)
+        self.assertEqual(next(t for t in result['tests'] if t['key'] == 'https_config')['status'], 'fail')
+        self.assertEqual(result['rating'], 'weak')
+
+    def test_rtsp_uri_userinfo_is_separated_for_anonymous_probe(self):
+        url, credentials = split_stream_credentials('rtsp://u:p%21@192.168.1.7:554/live',
+                                                    ipaddress.ip_address('192.168.1.7'))
+        self.assertEqual(url, 'rtsp://192.168.1.7:554/live')
+        self.assertEqual(credentials, ('u', 'p!'))
 
     def test_report_escapes_device_info_and_optional_secrets(self):
         base = {'target': '192.168.1.7', 'port': 80, 'device_information': {'Model': '<camera>'}}
