@@ -15,6 +15,15 @@ def assess(report):
             'pass' if status in (401, 403) else 'unknown',
             f'HTTP {status}; 401/403 означава ограничен достъп, а HTTP 200 не доказва вход.' if status else 'Няма HTTP отговор.',
             f'HTTP {status}; 401/403 indicates restricted access, while HTTP 200 does not prove login.' if status else 'No HTTP response.')
+        options = report.get('rtsp_options')
+        add('rtsp_service', 'RTSP услуга', 'RTSP service', 'unknown',
+            f'OPTIONS: {options or "няма отговор"}; това не доказва достъп до видео.',
+            f'OPTIONS: {options or "no response"}; this does not prove video access.')
+        authenticated = report.get('authenticated_rtsp_describe')
+        add('authenticated_rtsp', 'RTSP с въведени данни', 'RTSP with supplied credentials',
+            'pass' if isinstance(authenticated, str) and authenticated.startswith('RTSP/1.0 200 ') else 'unknown',
+            f'RTSP DESCRIBE: {authenticated or "не е проверено"}.',
+            f'RTSP DESCRIBE: {authenticated or "not checked"}.')
     else:
         for key, title_bg, title_en, status_key in [
             ('onvif_capabilities', 'ONVIF информация', 'ONVIF capabilities', 'capabilities'),
@@ -37,11 +46,31 @@ def assess(report):
         'fail' if code == '200' else 'pass' if code in ('401', '403') else 'unknown',
         f'RTSP DESCRIBE: {rtsp or "не е проверено"}.',
         f'RTSP DESCRIBE: {rtsp or "not checked"}.')
+    authenticated_rtsp = report.get('authenticated_rtsp_describe')
+    if not report.get('camera_type') and report.get('full_audit'):
+        add('rtsp_with_credentials', 'RTSP с налични данни', 'RTSP with available credentials',
+            'pass' if isinstance(authenticated_rtsp, str) and authenticated_rtsp.startswith('RTSP/1.0 200 ') and code in ('401', '403') else 'unknown',
+            f'RTSP DESCRIBE: {authenticated_rtsp or "не е проверено"}.',
+            f'RTSP DESCRIBE: {authenticated_rtsp or "not checked"}.')
     password = report.get('password_assessment') or {}
     add('password', 'Въведена парола', 'Supplied password',
         ('fail' if password.get('risk') in ('high', 'medium') else 'pass' if password.get('risk') == 'low' else 'unknown'),
         'Локална оценка; не доказва устойчивост срещу всички атаки.' if password.get('checked') else 'Парола не е въведена.',
         'Offline heuristic; does not prove resistance to all attacks.' if password.get('checked') else 'No password supplied.')
+    if not report.get('camera_type') and report.get('full_audit'):
+        settings = report.get('configuration_snapshot') or {}
+        protocols = (settings.get('network_protocols') or {}).get('values', {}).get('protocols') or []
+        https = next((p for p in protocols if str(p.get('name', '')).upper() == 'HTTPS'), None)
+        add('https_config', 'HTTPS протокол', 'HTTPS protocol',
+            'pass' if https and str(https.get('enabled')).lower() == 'true' else
+            'fail' if https and str(https.get('enabled')).lower() == 'false' else 'unknown',
+            'ONVIF конфигурация: HTTPS включен.' if https and str(https.get('enabled')).lower() == 'true' else 'HTTPS не е потвърден като включен.',
+            'ONVIF configuration: HTTPS enabled.' if https and str(https.get('enabled')).lower() == 'true' else 'HTTPS was not confirmed enabled.')
+        mode = (settings.get('discovery_mode') or {}).get('values', {}).get('mode')
+        add('discovery_mode', 'Режим на откриване', 'Discovery mode',
+            'pass' if mode == 'NonDiscoverable' else 'unknown',
+            f'ONVIF DiscoveryMode: {mode or "не е предоставен"}.',
+            f'ONVIF DiscoveryMode: {mode or "not provided"}.')
     count = {state: sum(test['status'] == state for test in tests) for state in ('pass', 'fail', 'unknown')}
     coverage = count['pass'] + count['fail']
     if count['fail']:
