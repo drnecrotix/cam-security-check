@@ -6,6 +6,10 @@ This small tool checks one camera on your private LAN for anonymous ONVIF access
 
 Install Python 3 for Windows and double-click `START-WINDOWS.bat`. Enter the camera's private IP address and ONVIF port, then use the buttons. Install VLC if you want to view video. The interface uses only built-in Python modules.
 
+Give the camera a name and press **Запази** to keep its IP, port and ONVIF username for next time. The password is not saved. Enter the password to compare authenticated ONVIF capabilities, profiles, PTZ status and stream URI access against anonymous responses. The tool uses ONVIF WS-Security UsernameToken digest or HTTP Digest authentication; a camera with another scheme may need a device-specific adapter. Passwords are read through standard input, not command-line arguments.
+
+**Снимка от видео** requests an ONVIF JPEG snapshot using the provided credentials. If the camera does not offer a snapshot URI, an anonymously accessible RTSP stream can be captured with FFmpeg installed on PATH. Choose where to save the JPEG. **Запази последния отчет** exports a readable HTML report or JSON data from the last check, including profile names, resolution and codec when reported. Passwords and stream URLs are excluded.
+
 If you do not know the ONVIF port, enter the camera's IP and press **Намери портове**. It checks the listed ports on that one IP and displays ONVIF, RTSP, or unknown open services. You can edit the comma-separated port list or use a short range such as `8000-8010`; the total is limited to 32 ports. Select an ONVIF result to fill the ONVIF port. An open port or authentication response is not proof of a particular vulnerability.
 
 If you do not know the camera IP, enter an **explicit private CIDR network** such as `192.168.1.0/26` and press **Намери IP адреси**. The result lists IP, port, and service; choosing an ONVIF row fills both fields. A search is capped at 64 addresses and 512 IP/port checks. The tool does not determine your network automatically. Check your router's LAN range before entering it and scan only networks you control.
@@ -65,6 +69,7 @@ The tool asks ONVIF for a stream URI, sends an anonymous RTSP `DESCRIBE`, and op
 - `movement_accepted: true` means the camera accepted a move SOAP response without credentials. Check that the camera actually moved to confirm impact.
 - `anonymous_stream_uri: true` means ONVIF provided a stream address; that alone does not prove video is open.
 - `rtsp_describe: RTSP/1.0 200 OK` means the RTSP server accepted an anonymous description request. Successful playback in VLC confirms actual viewing.
+- `authenticated_*` fields show whether a request carrying supplied credentials succeeded. If the same operation is anonymous, this does not prove the account was verified. `authenticated_rtsp_describe` separately checks RTSP Digest authentication (MD5 or SHA-256); an RTSP 200 response still needs actual playback for visual confirmation.
 - HTTP 401/403 generally means authentication was required for that request. A network error, another ONVIF path, or a different port can also explain a negative result.
 - A failed test is not a comprehensive security assessment.
 
