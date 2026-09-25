@@ -1,25 +1,34 @@
 """Windows-friendly single-camera interface for audit.py."""
 import ipaddress
 import json
+import os
 import subprocess
 import sys
 import threading
 import tkinter as tk
 import webbrowser
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 from scan import DEFAULT_PORTS, parse_ports, scan_hosts
 from wifi_scan import nearby_networks
+from reporting import render_html
+
+CONFIG_PATH = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'CameraAudit' / 'cameras.json'
 
 
 class App:
     def __init__(self, root):
         self.root = root
         root.title('Проверка на ONVIF камера')
-        root.geometry('680x540')
-        root.minsize(560, 450)
+        root.geometry('760x760')
+        root.minsize(640, 620)
         self.ip = tk.StringVar()
         self.port = tk.StringVar(value='80')
+        self.name = tk.StringVar()
+        self.username = tk.StringVar()
+        self.password = tk.StringVar()
+        self.last_report = None
+        self.cameras = self.load_cameras()
         self.scan_ports = tk.StringVar(value=DEFAULT_PORTS)
         self.network = tk.StringVar()
         self.status = tk.StringVar(value='Въведи локалния IP адрес на твоята камера.')
@@ -29,6 +38,17 @@ class App:
         ttk.Label(frame, text='Проверка на собствена камера', font=('Segoe UI', 17, 'bold')).pack(anchor='w')
         ttk.Label(frame, text='Само една камера в частната ти мрежа. Без търсене на други устройства.').pack(anchor='w', pady=(4, 16))
 
+        saved = ttk.Frame(frame)
+        saved.pack(fill='x', pady=(0, 10))
+        ttk.Label(saved, text='Запазени камери').pack(anchor='w')
+        row = ttk.Frame(saved)
+        row.pack(fill='x')
+        self.camera_select = ttk.Combobox(row, state='readonly', values=[c['name'] for c in self.cameras])
+        self.camera_select.pack(side='left', fill='x', expand=True, padx=(0, 6))
+        self.camera_select.bind('<<ComboboxSelected>>', self.select_camera)
+        ttk.Button(row, text='Запази', command=self.save_camera).pack(side='left', padx=3)
+        ttk.Button(row, text='Изтрий', command=self.delete_camera).pack(side='left', padx=3)
+
         fields = ttk.Frame(frame)
         fields.pack(fill='x')
         ttk.Label(fields, text='IP адрес').grid(row=0, column=0, sticky='w')
@@ -36,6 +56,15 @@ class App:
         ttk.Label(fields, text='ONVIF порт').grid(row=0, column=1, sticky='w')
         ttk.Entry(fields, textvariable=self.port, width=12).grid(row=1, column=1, sticky='w')
         fields.columnconfigure(0, weight=1)
+
+        auth = ttk.Frame(frame)
+        auth.pack(fill='x', pady=(10, 0))
+        for column, label, var, show in [(0, 'Име на камерата', self.name, ''),
+                                         (1, 'ONVIF потребител', self.username, ''),
+                                         (2, 'Парола (не се запазва)', self.password, '*')]:
+            ttk.Label(auth, text=label).grid(row=0, column=column, sticky='w')
+            ttk.Entry(auth, textvariable=var, show=show).grid(row=1, column=column, sticky='ew', padx=(0, 8))
+            auth.columnconfigure(column, weight=1)
 
         discover = ttk.Frame(frame)
         discover.pack(fill='x', pady=(12, 0))
@@ -58,16 +87,81 @@ class App:
         buttons.pack(fill='x', pady=(18, 12))
         self.buttons = []
         for label, flag in [('Провери достъпа', None), ('Провери видео', '--video-test'),
-                            ('Покажи видео във VLC', '--view-video'), ('Тествай PTZ движение', '--move-test')]:
+                            ('Покажи видео във VLC', '--view-video'), ('Снимка от видео', '--snapshot'),
+                            ('Тествай PTZ движение', '--move-test')]:
             button = ttk.Button(buttons, text=label, command=lambda f=flag: self.run(f))
             button.pack(fill='x', pady=3)
             self.buttons.append(button)
+        ttk.Button(buttons, text='Запази последния отчет', command=self.save_report).pack(fill='x', pady=3)
 
         ttk.Label(frame, textvariable=self.status, wraplength=620).pack(anchor='w', pady=(3, 8))
         self.output = tk.Text(frame, wrap='word', height=14, state='disabled', font=('Consolas', 10))
         self.output.pack(fill='both', expand=True)
-        ttk.Label(frame, text='За видео е нужен VLC. При PTZ тест камерата може да се премести за кратко.',
+        ttk.Label(frame, text='За видео е нужен VLC, а за снимка - FFmpeg. Паролата не се записва. При PTZ тест камерата може да се премести за кратко.',
                   wraplength=620).pack(anchor='w', pady=(10, 0))
+
+    def load_cameras(self):
+        try:
+            data = json.loads(CONFIG_PATH.read_text(encoding='utf-8'))
+            if isinstance(data, list):
+                return [dict(name=str(x['name']), ip=str(x['ip']), port=int(x['port']),
+                             username=str(x.get('username', ''))) for x in data if isinstance(x, dict)]
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        return []
+
+    def select_camera(self, _event=None):
+        match = next((c for c in self.cameras if c['name'] == self.camera_select.get()), None)
+        if match:
+            self.name.set(match['name'])
+            self.ip.set(match['ip'])
+            self.port.set(str(match['port']))
+            self.username.set(match['username'])
+            self.password.set('')
+
+    def save_camera(self):
+        name = self.name.get().strip()
+        try:
+            ip = ipaddress.ip_address(self.ip.get().strip())
+            port = int(self.port.get().strip())
+            if not name or ip.version != 4 or not ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or not 1 <= port <= 65535:
+                raise ValueError()
+            record = {'name': name, 'ip': str(ip), 'port': port, 'username': self.username.get().strip()}
+            self.cameras = [c for c in self.cameras if c['name'] != name] + [record]
+            CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            CONFIG_PATH.write_text(json.dumps(self.cameras, ensure_ascii=False, indent=2), encoding='utf-8')
+            self.camera_select.configure(values=[c['name'] for c in self.cameras])
+            self.camera_select.set(name)
+            self.status.set('Камерата е запазена без паролата.')
+        except (ValueError, OSError) as error:
+            messagebox.showerror('Неуспешно запазване', 'Въведи име, частен IP и валиден порт. ' + str(error))
+
+    def delete_camera(self):
+        name = self.camera_select.get()
+        if not name:
+            return
+        try:
+            self.cameras = [c for c in self.cameras if c['name'] != name]
+            CONFIG_PATH.write_text(json.dumps(self.cameras, ensure_ascii=False, indent=2), encoding='utf-8')
+            self.camera_select.configure(values=[c['name'] for c in self.cameras])
+            self.camera_select.set('')
+            self.status.set('Записът е изтрит.')
+        except OSError as error:
+            messagebox.showerror('Грешка', str(error))
+
+    def save_report(self):
+        if not self.last_report:
+            messagebox.showinfo('Няма отчет', 'Първо изпълни проверка на камера.')
+            return
+        path = filedialog.asksaveasfilename(defaultextension='.html', filetypes=[('HTML отчет', '*.html'), ('JSON данни', '*.json')])
+        if path:
+            try:
+                content = (json.dumps(self.last_report, ensure_ascii=False, indent=2)
+                           if path.lower().endswith('.json') else render_html(self.last_report))
+                Path(path).write_text(content, encoding='utf-8')
+                self.status.set('Отчетът е записан без парола и видео адрес.')
+            except OSError as error:
+                messagebox.showerror('Грешка', str(error))
 
     def show(self, value):
         self.output.configure(state='normal')
@@ -238,30 +332,60 @@ class App:
         if flag == '--move-test' and not messagebox.askyesno('PTZ движение',
                 'Камерата може да се премести за кратко. Наблюдавай я и продължи само ако е твоя или имаш разрешение.'):
             return
+        if self.password.get() and not self.username.get().strip():
+            messagebox.showerror('Липсва потребител', 'Въведи ONVIF потребител за тази парола.')
+            return
+        if flag == '--snapshot':
+            destination = filedialog.asksaveasfilename(defaultextension='.jpg', filetypes=[('JPEG снимка', '*.jpg')])
+            if not destination:
+                return
         self.status.set('Проверявам камерата...')
         self.show('Свързване...')
         for button in self.buttons:
             button.configure(state='disabled')
         args = [sys.executable, str(Path(__file__).with_name('audit.py')), str(ip), '--port', str(port)]
-        if flag:
+        password = None
+        if self.username.get().strip() and self.password.get():
+            args += ['--username', self.username.get().strip(), '--password-stdin']
+            password = self.password.get() + '\n'
+        if flag == '--snapshot':
+            args += ['--video-test', '--snapshot', destination]
+        elif flag:
             args.append(flag)
-        threading.Thread(target=self.worker, args=(args,), daemon=True).start()
+        threading.Thread(target=self.worker, args=(args, password), daemon=True).start()
 
-    def worker(self, args):
+    def worker(self, args, password=None):
         try:
-            process = subprocess.run(args, capture_output=True, text=True, timeout=70, errors='replace')
+            process = subprocess.run(args, input=password, capture_output=True, text=True, timeout=70, errors='replace')
             raw = (process.stdout + '\n' + process.stderr).strip()
             start = raw.find('{')
+            report = None
             if start >= 0:
                 report, _ = json.JSONDecoder().raw_decode(raw[start:])
                 lines = [f"Камера: {report['target']}:{report['port']}",
                          f"ONVIF без парола: {'Да' if report['anonymous_capabilities'] else 'Не е потвърдено'}",
                          f"Профили без парола: {'Да' if report['anonymous_profiles'] else 'Не е потвърдено'}",
                          f"PTZ статус без парола: {'Да' if report['anonymous_ptz_status'] else 'Не е потвърдено'}"]
-                if '--video-test' in args or '--view-video' in args:
+                if report.get('authenticated'):
+                    lines += [f"ONVIF заявка с данни: {'Успешна' if report.get('authenticated_capabilities') else 'Неуспешна'}",
+                              f"Профили с данни: {'Успешна' if report.get('authenticated_profiles') else 'Неуспешна'}",
+                              f"PTZ статус с данни: {'Успешна' if report.get('authenticated_ptz_status') else 'Неуспешна'}",
+                              f"Адрес за видео с данни: {'Успешна' if report.get('authenticated_stream_uri') else 'Неуспешна'}",
+                              f"RTSP с данни: {report.get('authenticated_rtsp_describe') or 'Няма отговор'}",
+                              'Ако същата заявка работи без парола, успехът не доказва, че акаунтът е проверен.']
+                items = report.get('video_profiles', [])
+                if items:
+                    lines.append('')
+                    lines.append('Видео профили:')
+                    for item in items:
+                        resolution = f"{item.get('width') or '?'}x{item.get('height') or '?'}"
+                        lines.append(f" - {item.get('name') or 'Без име'}: {resolution}, {item.get('codec') or 'неизвестен кодек'}")
+                if '--video-test' in args or '--view-video' in args or '--snapshot' in args:
                     lines += [f"Адрес за видео без парола: {'Да' if report['anonymous_stream_uri'] else 'Не е потвърдено'}",
                               f"Отговор на RTSP: {report['rtsp_describe'] or 'Няма'}",
                               f"VLC е стартиран: {'Да' if report['viewer_started'] else 'Не'}"]
+                if '--snapshot' in args:
+                    lines.append(f"Снимка: {'Записана' if report.get('snapshot_saved') else report.get('snapshot_error') or 'Не е достъпна без парола'}")
                 if '--move-test' in args:
                     lines += [f"Команда за движение приета: {'Да' if report['movement_accepted'] else 'Не'}",
                               f"Команда за спиране приета: {'Да' if report['stop_accepted'] else 'Не'}"]
@@ -269,12 +393,13 @@ class App:
                 result = '\n'.join(lines)
             else:
                 result = raw or f'Проверката приключи с код {process.returncode}.'
-            self.root.after(0, lambda: self.finish(result))
+            self.root.after(0, lambda: self.finish(result, report))
         except (OSError, subprocess.TimeoutExpired, ValueError, KeyError) as error:
             message = f'Грешка при проверката: {error}'
             self.root.after(0, lambda: self.finish(message))
 
-    def finish(self, result):
+    def finish(self, result, report=None):
+        self.last_report = report
         self.show(result)
         self.status.set('Проверката приключи.')
         for button in self.buttons:
