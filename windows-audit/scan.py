@@ -2,8 +2,10 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import ipaddress
 import socket
+import urllib.error
+import urllib.request
 
-from audit import DEV, call
+from audit import DEV, NoRedirect, call
 
 DEFAULT_PORTS = '80,554,8000,8080,8081,8899,9000'
 
@@ -54,9 +56,23 @@ def check(ip, port):
         service = 'ONVIF - вероятно изисква удостоверяване'
     else:
         try:
-            service = 'RTSP' if probe(ip, port) else 'Отворен порт - непозната услуга'
+            if probe(ip, port):
+                service = 'RTSP - протокол открит'
+            else:
+                service = 'Отворен порт - непозната услуга'
         except OSError:
             service = 'Отворен порт - непозната услуга'
+        # A web response identifies HTTP only, never proves the device is a camera.
+        if service.startswith('Отворен порт'):
+            try:
+                request = urllib.request.Request(url=f'http://{ip}:{port}/', method='HEAD')
+                with urllib.request.build_opener(NoRedirect).open(request, timeout=1) as response:
+                    service = 'HTTP - уеб интерфейс' if response.status < 500 else service
+            except urllib.error.HTTPError as error:
+                if error.code in (401, 403, 405):
+                    service = 'HTTP - уеб интерфейс'
+            except (urllib.error.URLError, TimeoutError, OSError):
+                pass
     return (str(ip), port, service)
 
 
