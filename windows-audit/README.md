@@ -106,3 +106,7 @@ Use **Други IP камери (RTSP/HTTP) / Other IP cameras (RTSP/HTTP)** fo
 The default report omits credentials and stream URLs. To retain stream URLs in memory during an audit, enable **Събери адресите на потоците за поверителен отчет** before the run. At export choose a confidential report to include those URLs and the password currently supplied to the check; handle this HTML/JSON file as a secret. Normal export excludes them. The password is never written to the saved camera inventory.
 
 Run the local checks with `python -m unittest discover -s tests -v` from the `windows-audit` folder.
+
+### Expanded offline password audit
+
+When you enter an ONVIF or RTSP password, the app compares it locally against a bounded set of common camera passwords, numeric guesses, username variants and simple suffixes. It also checks length, repeated characters, keyboard sequences, years, username inclusion and low character variety. The report records only the result, pattern names and number of local candidates, not candidate strings or the password in a standard export. This is a heuristic, not proof that a password is resistant to cracking. No dictionary or brute-force attempts are sent to the camera; account lockout and service disruption are avoided.
