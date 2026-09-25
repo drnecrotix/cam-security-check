@@ -10,6 +10,7 @@ import urllib.request
 from audit import NoRedirect, rtsp_describe
 from password_audit import assess
 from reporting import checklist
+from security_assessment import assess as assess_security
 
 
 def http_check(ip, port, timeout):
@@ -24,7 +25,7 @@ def http_check(ip, port, timeout):
         return None
 
 
-def run(ip, http_port, rtsp_port, rtsp_path, timeout, credentials=None):
+def run(ip, http_port, rtsp_port, rtsp_path, timeout, credentials=None, include_sensitive=False):
     address = ipaddress.ip_address(ip)
     if (address.version != 4 or not address.is_private or address.is_loopback or
             address.is_link_local or address.is_reserved or address.is_multicast):
@@ -44,6 +45,9 @@ def run(ip, http_port, rtsp_port, rtsp_path, timeout, credentials=None):
               'authenticated': bool(credentials),
               'password_assessment': assess(credentials[1], credentials[0]) if credentials else {'checked': False},
               'video_profiles': []}
+    if include_sensitive:
+        result['sensitive'] = {'stream_uris': [uri] if uri else []}
+    result['security_assessment'] = assess_security(result)
     result['checklist'] = checklist(result)
     return result
 
@@ -57,13 +61,15 @@ def main():
     parser.add_argument('--timeout', type=float, default=4)
     parser.add_argument('--username')
     parser.add_argument('--password-stdin', action='store_true')
+    parser.add_argument('--include-sensitive', action='store_true')
     args = parser.parse_args()
     if args.password_stdin and not args.username:
         parser.error('--password-stdin requires --username')
     credentials = ((args.username, sys.stdin.readline().rstrip('\r\n') if args.password_stdin else getpass.getpass())
                    if args.username else None)
     try:
-        result = run(args.ip, args.http_port, args.rtsp_port, args.rtsp_path, args.timeout, credentials)
+        result = run(args.ip, args.http_port, args.rtsp_port, args.rtsp_path, args.timeout,
+                     credentials, args.include_sensitive)
     except ValueError as error:
         parser.error(str(error))
     print(json.dumps(result, ensure_ascii=False, indent=2))
