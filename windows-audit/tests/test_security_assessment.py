@@ -39,7 +39,7 @@ class SecurityAssessmentTests(unittest.TestCase):
         self.assertNotIn('secret-value', render_html(base))
         with_secret = {**base, 'sensitive': {'password': 'secret-value', 'stream_uris': ['rtsp://192.168.1.7/live']}}
         self.assertIn('secret-value', render_html(with_secret))
-        self.assertIn('dev: dr.necrotix', render_html(with_secret))
+        self.assertIn('>dr.necrotix</a>', render_html(with_secret))
 
 
 if __name__ == '__main__':
