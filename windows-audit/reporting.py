@@ -138,12 +138,24 @@ def render_html(report, lang='bg'):
                         for t in security.get('tests', []))
     info = report.get('device_information') or {}
     info_rows = ''.join(f'<tr><th>{escape(str(k))}</th><td>{escape(str(v))}</td></tr>' for k, v in info.items() if v)
+    network_rows = ''.join(f'<tr><td>{escape(str(item.get("name") or "?"))}</td><td>{escape(str(item.get("mac") or "?"))}</td><td>{escape(", ".join(item.get("addresses") or []))}</td></tr>'
+                           for item in report.get('network_interfaces') or [])
+    wireless_rows = ''.join(f'<tr><td>{escape(str(item.get("interface") or "?"))}</td><td>{escape(str(item.get("ssid") or "?"))}</td><td>{escape(str(item.get("bssid") or "?"))}</td><td>{escape(str(item.get("signal") or "?"))}</td></tr>'
+                            for item in report.get('wireless_interfaces') or [])
     sensitive = report.get('sensitive') or {}
-    private_rows = ''.join(f'<tr><th>{escape(str(key))}</th><td>{escape(str(value or "-"))}</td></tr>'
-                           for key, value in (('username', sensitive.get('username')),
-                                              ('password', sensitive.get('password'))))
+    missing = label('Не са въведени при проверката', 'Not supplied for this check')
+    private_rows = ''.join(f'<tr><th>{escape(key)}</th><td>{escape(str(value if value is not None else missing))}</td></tr>'
+                           for key, value in ((label('Потребител', 'Username'), sensitive.get('username')),
+                                              (label('Парола', 'Password'), sensitive.get('password'))))
     private_rows += ''.join(f'<tr><th>RTSP {index}</th><td>{escape(str(uri))}</td></tr>'
                             for index, uri in enumerate(sensitive.get('stream_uris') or [], 1))
+    if not sensitive.get('stream_uris'):
+        reason = (label('Събирането не е било включено при проверката. Пусни нова проверка с отметката включена.',
+                        'Collection was disabled during the check. Run it again with the checkbox enabled.')
+                  if not sensitive.get('collected') else
+                  label('Камерата не върна RTSP адрес. Провери ONVIF Media профила или въведи RTSP път в режима за други камери.',
+                        'The camera returned no RTSP URI. Check the ONVIF Media profile or supply a path in the other-camera mode.'))
+        private_rows += f'<tr><th>RTSP</th><td>{escape(reason)}</td></tr>'
     private_section = (f'<section class="summary"><h2>{label("Поверителни данни - не споделяй отчета", "Confidential data - do not share this report")}</h2><table>{private_rows}</table></section>'
                        if sensitive else '')
     findings = [item for item in items if item.get('finding')]
@@ -164,8 +176,10 @@ def render_html(report, lang='bg'):
 <section class="summary"><h2>{label('Приоритетни действия', 'Priority actions')}</h2><p>{label('Установени слаби места', 'Findings')}: {len(findings)} · {label('Непроверени', 'Not checked')}: {len(pending)}</p><ul>{summary or '<li>' + label('Няма потвърдено слабо място от извършените проверки.', 'No weakness confirmed by the performed checks.') + '</li>'}</ul></section>
 <h2>{label('Автоматични тестове', 'Automated security checks')}</h2><table><tr><th>{label('Тест', 'Test')}</th><th>{label('Статус', 'Status')}</th><th>{label('Доказателство', 'Evidence')}</th></tr>{test_rows or '<tr><td colspan="3">' + label('Няма данни', 'No data') + '</td></tr>'}</table>
 <h2>{label('Информация за устройството', 'Device information')}</h2><table>{info_rows or '<tr><td>' + label('Не е предоставена', 'Not provided') + '</td></tr>'}</table>
+<h2>{label('Мрежови интерфейси', 'Network interfaces')}</h2><table><tr><th>{label('Име', 'Name')}</th><th>MAC</th><th>IP</th></tr>{network_rows or '<tr><td colspan="3">' + label('Не са предоставени', 'Not provided') + '</td></tr>'}</table>
+<h2>{label('Wi-Fi данни от камерата', 'Camera Wi-Fi data')}</h2><table><tr><th>{label('Интерфейс', 'Interface')}</th><th>SSID</th><th>BSSID</th><th>{label('Сигнал', 'Signal')}</th></tr>{wireless_rows or '<tr><td colspan="4">' + label('Камерата не предостави Wi-Fi статус през ONVIF. Това не означава, че няма Wi-Fi.', 'The camera did not provide Wi-Fi status over ONVIF. This does not mean it has no Wi-Fi.') + '</td></tr>'}</table>
 {private_section}
 <h2>{label('Проверки и доказателства', 'Checks and evidence')}</h2><table><thead><tr><th>{label('Проверка', 'Check')}</th><th>{label('Резултат', 'Result')}</th><th>{label('Риск', 'Risk')}</th><th>{label('Наблюдение', 'Observation')}</th><th>{label('Какво да подобриш', 'Action')}</th></tr></thead><tbody>{rows}</tbody></table>
 <h2>{label('Видео профили', 'Video profiles')}</h2><table><tr><th>{label('Име', 'Name')}</th><th>{label('Резолюция', 'Resolution')}</th><th>{label('Кодек', 'Codec')}</th></tr>{profile_rows or '<tr><td colspan="3">' + label('Няма получени профили', 'No profiles received') + '</td></tr>'}</table>
 <p class="muted">{label('RTSP DESCRIBE 200 не доказва възпроизвеждане. Отрицателен тест не доказва пълна защита. Паролата се оценява локално и не се записва.', 'RTSP DESCRIBE 200 does not prove playback. A negative test does not prove complete security. Password assessment is local and the password is not saved.')}</p>
-<footer>dev: dr.necrotix</footer></html>'''
+<footer>dev: <a href="https://necrotixlab.com/services" target="_blank" rel="noopener noreferrer">dr.necrotix</a></footer></html>'''
