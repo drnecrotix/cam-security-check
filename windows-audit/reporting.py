@@ -112,8 +112,8 @@ def _add_password(items, add, report):
         patterns = ', '.join(strength.get('patterns', []))
         add('password_strength', ('Въведена парола', 'Supplied password'), risk in ('high', 'medium'),
             risk if risk in ('high', 'medium') else 'info',
-            (f'Локална оценка: {strength.get("length", "?")} символа; често срещана: {"да" if strength.get("matched_small_offline_guess_set") else "не"}; предвидими шаблони: {patterns or "няма"}.',
-             f'Offline assessment: {strength.get("length", "?")} characters; common: {"yes" if strength.get("matched_small_offline_guess_set") else "no"}; predictable patterns: {patterns or "none"}.'),
+            (f'Локална оценка: {strength.get("length", "?")} символа; често срещана: {"да" if strength.get("matched_small_offline_guess_set") else "не"}; предвидими шаблони: {patterns or "няма"}; локални кандидати: {strength.get("offline_candidates_checked", 0)}.',
+             f'Offline assessment: {strength.get("length", "?")} characters; common: {"yes" if strength.get("matched_small_offline_guess_set") else "no"}; predictable patterns: {patterns or "none"}; local candidates: {strength.get("offline_candidates_checked", 0)}.'),
             ('Използвай уникална дълга парола и провери настройките за блокиране на опити.',
              'Use a long unique password and review login attempt lockout settings.'))
     else:
