@@ -8,6 +8,8 @@ Install Python 3 for Windows and double-click `START-WINDOWS.bat`. Enter the cam
 
 If you do not know the ONVIF port, enter the camera's IP and press **Намери портове**. It checks the listed ports on that one IP and displays ONVIF, RTSP, or unknown open services. You can edit the comma-separated port list or use a short range such as `8000-8010`; the total is limited to 32 ports. Select an ONVIF result to fill the ONVIF port. An open port or authentication response is not proof of a particular vulnerability.
 
+If you do not know the camera IP, enter an **explicit private CIDR network** such as `192.168.1.0/26` and press **Намери IP адреси**. The result lists IP, port, and service; choosing an ONVIF row fills both fields. A search is capped at 64 addresses and 512 IP/port checks. The tool does not determine your network automatically. Check your router's LAN range before entering it and scan only networks you control.
+
 If Windows cannot find Python, install it from [python.org](https://www.python.org/downloads/windows/) with the Python launcher enabled. Alternatively open PowerShell in this folder and run:
 
 ```powershell
