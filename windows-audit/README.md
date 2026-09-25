@@ -110,3 +110,9 @@ Run the local checks with `python -m unittest discover -s tests -v` from the `wi
 ### Expanded offline password audit
 
 When you enter an ONVIF or RTSP password, the app compares it locally against a bounded set of common camera passwords, numeric guesses, username variants and simple suffixes. It also checks length, repeated characters, keyboard sequences, years, username inclusion and low character variety. The report records only the result, pattern names and number of local candidates, not candidate strings or the password in a standard export. This is a heuristic, not proof that a password is resistant to cracking. No dictionary or brute-force attempts are sent to the camera; account lockout and service disruption are avoided.
+
+### Missing confidential fields and camera Wi-Fi
+
+The confidential export explains whether stream collection was enabled at the time of the latest audit. An empty stream list means the camera returned no ONVIF stream URI, or the RTSP path was not supplied for a non-ONVIF camera. The username and password fields contain only credentials entered for that specific check; the app does not retrieve an existing password from a camera.
+
+For ONVIF devices supporting IEEE 802.11 operations, the full audit reads `GetNetworkInterfaces` and `GetDot11Status` for configured/active SSID, BSSID and signal strength. It never includes Wi-Fi PSK or passphrase fields. Wired devices and cameras that do not expose these operations show an explicit unavailable state. The report footer links `dr.necrotix` to `https://necrotixlab.com/services` in a new browser tab.
