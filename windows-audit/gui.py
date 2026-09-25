@@ -58,6 +58,7 @@ EN = {
     'Избери ONVIF потребител': 'Select ONVIF username',
     'Камерата върна няколко потребителя. Избери своя:': 'The camera returned several users. Select yours:',
     'Използвай': 'Use', 'Други IP камери (RTSP/HTTP)': 'Other IP cameras (RTSP/HTTP)',
+    'Събери адресите на потоците за поверителен отчет': 'Collect stream URLs for confidential report',
     'Камера и достъп': 'Camera and access', 'Проверки': 'Checks',
     'Резултат и конзола': 'Results and console', 'Търсене и мрежа': 'Discovery and network',
     'Готово за проверка. Избери камера или въведи IP адрес.': 'Ready to check. Select a camera or enter its IP address.',
@@ -101,6 +102,9 @@ class App:
         self.name = tk.StringVar()
         self.username = tk.StringVar()
         self.password = tk.StringVar()
+        self.collect_sensitive = tk.BooleanVar(value=False)
+        self.report_password = None
+        self.report_username = None
         self.last_report = None
         self.cameras = self.load_cameras()
         self.scan_ports = tk.StringVar(value=DEFAULT_PORTS)
@@ -167,6 +171,8 @@ class App:
         for column in range(3):
             actions.columnconfigure(column, weight=1)
         ttk.Button(shell, text='Запази последния отчет', command=self.save_report).pack(anchor='e', pady=(8, 0))
+        ttk.Checkbutton(shell, text='Събери адресите на потоците за поверителен отчет',
+                        variable=self.collect_sensitive).pack(anchor='e')
 
         console = ttk.LabelFrame(shell, text='Резултат и конзола', padding=8)
         console.pack(fill='both', expand=True, pady=(8, 0))
@@ -236,10 +242,14 @@ class App:
                     '--http-port', str(hp), '--rtsp-port', str(rp)]
             if rtsp_path:
                 args += ['--rtsp-path', rtsp_path]
+            if self.collect_sensitive.get():
+                args.append('--include-sensitive')
             password = None
             if self.username.get().strip() and self.password.get():
                 args += ['--username', self.username.get().strip(), '--password-stdin']
                 password = self.password.get() + '\n'
+            self.report_password = self.password.get() if password else None
+            self.report_username = self.username.get().strip() if password else None
             self.generic_http_port, self.generic_rtsp_port = str(hp), str(rp)
             for button in self.buttons:
                 button.configure(state='disabled')
@@ -386,13 +396,23 @@ class App:
             messagebox.showinfo(self.say('Няма отчет', 'No report'),
                                 self.say('Първо изпълни проверка на камера.', 'Run a camera check first.'))
             return
+        confidential = messagebox.askyesno(
+            self.say('Поверителен отчет', 'Confidential report'),
+            self.say('Да включа ли събраните RTSP адреси и въведената парола? Файлът ще съдържа данни за достъп. Запази го само на защитено място. Избери „Не“ за стандартен отчет.',
+                     'Include collected RTSP URLs and the supplied password? The file will contain access details. Store it securely. Select No for a standard report.'))
         path = filedialog.asksaveasfilename(defaultextension='.html', filetypes=[('HTML отчет', '*.html'), ('JSON данни', '*.json')])
         if path:
             try:
-                content = (json.dumps(self.last_report, ensure_ascii=False, indent=2)
-                           if path.lower().endswith('.json') else render_html(self.last_report, self.language.get()))
+                report = {key: value for key, value in self.last_report.items() if key != 'sensitive'}
+                if confidential:
+                    report['sensitive'] = {**self.last_report.get('sensitive', {}),
+                                           'username': self.report_username,
+                                           'password': self.report_password}
+                content = (json.dumps(report, ensure_ascii=False, indent=2)
+                           if path.lower().endswith('.json') else render_html(report, self.language.get()))
                 Path(path).write_text(content, encoding='utf-8')
-                self.status.set(self.say('Отчетът е записан без парола и видео адрес.', 'Report saved without password or stream URL.'))
+                self.status.set(self.say('Поверителният отчет е записан.' if confidential else 'Стандартният отчет е записан.',
+                                         'Confidential report saved.' if confidential else 'Standard report saved.'))
             except OSError as error:
                 messagebox.showerror('Грешка', str(error))
 
@@ -806,6 +826,10 @@ class App:
         if self.username.get().strip() and self.password.get():
             args += ['--username', self.username.get().strip(), '--password-stdin']
             password = self.password.get() + '\n'
+        self.report_password = self.password.get() if password else None
+        self.report_username = self.username.get().strip() if password else None
+        if self.collect_sensitive.get():
+            args.append('--include-sensitive')
         if flag == '--snapshot':
             args += ['--video-test', '--snapshot', destination]
         elif flag:
@@ -845,6 +869,18 @@ class App:
         english = self.language.get() == 'EN'
         yes = lambda value: ('Yes' if value else 'Not confirmed') if english else ('Да' if value else 'Не е потвърдено')
         label = (lambda bg, en: en if english else bg)
+        security = report.get('security_assessment') or {}
+        ratings = {'excellent': ('Отлична', 'Excellent'), 'good': ('Добра', 'Good'),
+                   'weak': ('Слаба', 'Weak'), 'insufficient_data': ('Недостатъчно данни', 'Insufficient data')}
+        summary = [f"{label('Оценка на защитата', 'Security rating')}: {label(*ratings.get(security.get('rating'), ('Неоценена', 'Not assessed')))}",
+                   f"{label('Издържани', 'Passed')}: {security.get('counts', {}).get('pass', 0)} | "
+                   f"{label('Неуспешни', 'Failed')}: {security.get('counts', {}).get('fail', 0)} | "
+                   f"{label('Непроверени', 'Unknown')}: {security.get('counts', {}).get('unknown', 0)}", '']
+        for test in security.get('tests', []):
+            status = {'pass': label('Издържан', 'Passed'), 'fail': label('Неуспешен', 'Failed'),
+                      'unknown': label('Непроверен', 'Unknown')}[test['status']]
+            summary.append(f"- {test['en' if english else 'bg']['title']}: {status}")
+        summary.append('')
         if report.get('camera_type'):
             lines = [f"{label('Камера', 'Camera')}: {report['target']}",
                      f"HTTP: {report.get('http_status_generic') or '-'}",
@@ -854,7 +890,7 @@ class App:
                 local = item['en' if english else 'bg']
                 lines += [f"- {local['title']}: {local['status']} ({local['risk']})",
                           f"  {local['evidence']}", f"  {local['action']}"]
-            return '\n'.join(lines)
+            return '\n'.join(summary + lines)
         lines = [f"{label('Камера', 'Camera')}: {report['target']}:{report['port']}",
                  f"{label('ONVIF без парола', 'ONVIF without password')}: {yes(report.get('anonymous_capabilities'))}",
                  f"{label('Профили без парола', 'Profiles without password')}: {yes(report.get('anonymous_profiles'))}",
@@ -885,7 +921,10 @@ class App:
             lines.append(f"   {local['action']}")
         lines += ['', label('Отрицателен тест не доказва пълна защита. Успех с данни не доказва проверена парола, ако анонимната заявка също работи.',
                              'A negative test does not prove security. A credentialed success does not prove the password was checked when anonymous access also works.')]
-        return '\n'.join(lines)
+        if report.get('device_information'):
+            lines += ['', label('Информация за устройството:', 'Device information:')]
+            lines.extend(f' - {key}: {value}' for key, value in report['device_information'].items() if value)
+        return '\n'.join(summary + lines)
 
 
 if __name__ == '__main__':
