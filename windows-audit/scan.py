@@ -44,7 +44,10 @@ def check(ip, port):
     except OSError:
         return None
     url = f'http://{ip}:{port}/onvif/device_service'
-    result = call(url, f'<d:GetCapabilities xmlns:d="{DEV}"><d:Category>All</d:Category></d:GetCapabilities>', 1.2)
+    try:
+        result = call(url, f'<d:GetCapabilities xmlns:d="{DEV}"><d:Category>All</d:Category></d:GetCapabilities>', 1.2)
+    except (OSError, ConnectionError):
+        result = {'ok': False, 'status': None, 'error': 'Connection closed'}
     if result['ok']:
         service = 'ONVIF - достъп без парола'
     elif result['status'] in (401, 403) or result['error'] == 'SOAP Fault':
@@ -64,7 +67,10 @@ def scan_hosts(addresses, ports):
     results = []
     with ThreadPoolExecutor(max_workers=64) as executor:
         for future in as_completed([executor.submit(check, ip, p) for ip in addresses for p in ports]):
-            result = future.result()
+            try:
+                result = future.result()
+            except (OSError, ConnectionError):
+                continue
             if result:
                 results.append(result)
     return sorted(results, key=lambda row: (ipaddress.ip_address(row[0]), row[1]))
