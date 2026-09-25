@@ -98,3 +98,11 @@ The status dot is yellow while a check or search is running, green when an ONVIF
 ### Other IP cameras
 
 Use **Други IP камери (RTSP/HTTP) / Other IP cameras (RTSP/HTTP)** for a private-network device without ONVIF. Supply its HTTP and RTSP ports and, if known, the RTSP path from its own settings or manual. An empty RTSP path skips video testing. The app checks HTTP response and RTSP DESCRIBE with and without supplied credentials; it does not guess vendor stream paths, record video, or store the password or RTSP URL. Discovery marks protocol evidence as ONVIF, RTSP or HTTP. An HTTP service alone is not proof that the device is a camera.
+
+### Automated security assessment
+
+**Пълен отчет / Full audit** runs non-destructive ONVIF and RTSP access checks. The report lists each check as passed, failed or unknown, ONVIF device information returned by the camera, and an evidence-limited rating: excellent, good, weak or insufficient data. A failed protection check makes the rating weak; unreachable endpoints never count as passed. A protected RTSP URI can be tested anonymously when retrieved with supplied credentials. PTZ movement remains a separate explicit opt-in.
+
+The default report omits credentials and stream URLs. To retain stream URLs in memory during an audit, enable **Събери адресите на потоците за поверителен отчет** before the run. At export choose a confidential report to include those URLs and the password currently supplied to the check; handle this HTML/JSON file as a secret. Normal export excludes them. The password is never written to the saved camera inventory.
+
+Run the local checks with `python -m unittest discover -s tests -v` from the `windows-audit` folder.
