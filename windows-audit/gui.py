@@ -11,7 +11,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from scan import DEFAULT_PORTS, parse_ports, scan_hosts
 from wifi_scan import nearby_networks
-from reporting import render_html, checklist
+from reporting import render_html, checklist, confidential_fields
 from local_lan import ethernet_networks
 from audit import discover_usernames
 from device_discovery import discover_onvif, windows_neighbors
@@ -79,6 +79,9 @@ def dark_style(root):
     style.map('TButton', background=[('active', '#284457'), ('disabled', '#26303b')],
               foreground=[('disabled', DARK['muted'])])
     style.configure('TEntry', fieldbackground=DARK['field'], foreground=DARK['text'], insertcolor=DARK['text'], padding=5)
+    style.configure('TCheckbutton', background=DARK['bg'], foreground=DARK['text'])
+    style.map('TCheckbutton', background=[('active', DARK['bg']), ('disabled', DARK['bg'])],
+              foreground=[('active', DARK['text']), ('disabled', DARK['muted'])])
     style.configure('TCombobox', fieldbackground=DARK['field'], foreground=DARK['text'], background=DARK['panel'])
     style.map('TCombobox', fieldbackground=[('readonly', DARK['field'])], foreground=[('readonly', DARK['text'])])
     style.configure('TNotebook', background=DARK['bg'], borderwidth=0)
@@ -95,8 +98,8 @@ class App:
         self.language = tk.StringVar(value='BG')
         dark_style(root)
         root.title('Проверка на ONVIF камера')
-        root.geometry('1080x760')
-        root.minsize(1020, 690)
+        root.geometry(f'{min(1160, root.winfo_screenwidth()-60)}x{min(850, root.winfo_screenheight()-90)}')
+        root.minsize(min(850, root.winfo_screenwidth()-60), min(620, root.winfo_screenheight()-90))
         self.ip = tk.StringVar()
         self.port = tk.StringVar(value='80')
         self.name = tk.StringVar()
@@ -117,8 +120,15 @@ class App:
         self.scan_button = None
         self.network_button = None
 
-        shell = ttk.Frame(root, padding=18)
-        shell.pack(fill='both', expand=True)
+        viewport = tk.Canvas(root, bg=DARK['bg'], highlightthickness=0)
+        viewport.pack(side='left', fill='both', expand=True)
+        page_scroll = ttk.Scrollbar(root, orient='vertical', command=viewport.yview)
+        page_scroll.pack(side='right', fill='y')
+        viewport.configure(yscrollcommand=page_scroll.set)
+        shell = ttk.Frame(viewport, padding=18)
+        shell_id = viewport.create_window((0, 0), window=shell, anchor='nw')
+        shell.bind('<Configure>', lambda event: viewport.configure(scrollregion=viewport.bbox('all')))
+        viewport.bind('<Configure>', lambda event: viewport.itemconfigure(shell_id, width=event.width))
         header = ttk.Frame(shell)
         header.pack(fill='x', pady=(0, 12))
         ttk.Label(header, text='Проверка на собствена камера', font=('Segoe UI', 18, 'bold')).pack(side='left')
@@ -147,16 +157,21 @@ class App:
             (2, 'Име на камерата', self.name, 20, ''),
             (3, 'ONVIF потребител', self.username, 18, ''),
             (4, 'Парола (не се запазва)', self.password, 20, '*')]:
-            ttk.Label(fields, text=label).grid(row=0, column=col, sticky='w', padx=(0, 8))
-            ttk.Entry(fields, textvariable=var, width=width, show=hidden).grid(row=1, column=col, sticky='ew', padx=(0, 8))
-            fields.columnconfigure(col, weight=1 if col in (0, 2, 3, 4) else 0)
+            grid_col, grid_row = col % 3, col // 3 * 2
+            ttk.Label(fields, text=label).grid(row=grid_row, column=grid_col, sticky='w', padx=(0, 8))
+            ttk.Entry(fields, textvariable=var, width=width, show=hidden).grid(row=grid_row+1, column=grid_col, sticky='ew', padx=(0, 8), pady=(0, 6))
+            fields.columnconfigure(grid_col, weight=1)
 
         quick = ttk.Frame(shell)
         quick.pack(fill='x', pady=(12, 8))
-        ttk.Button(quick, text='Търсене и мрежа', command=self.open_discovery).pack(side='left', padx=(0, 6))
-        ttk.Button(quick, text='Открий ONVIF потребител', command=self.discover_username_only).pack(side='left', padx=(0, 6))
-        ttk.Button(quick, text='Други IP камери (RTSP/HTTP)', command=self.open_generic_camera).pack(side='left', padx=(0, 6))
-        ttk.Button(quick, text='Отдалечен достъп през Tailscale', command=self.remote_help).pack(side='left')
+        for index, (caption, command) in enumerate([
+            ('Търсене и мрежа', self.open_discovery),
+            ('Открий ONVIF потребител', self.discover_username_only),
+            ('Други IP камери (RTSP/HTTP)', self.open_generic_camera),
+            ('Отдалечен достъп през Tailscale', self.remote_help)]):
+            ttk.Button(quick, text=caption, command=command).grid(row=index//2, column=index%2, sticky='ew', padx=3, pady=3)
+        quick.columnconfigure(0, weight=1)
+        quick.columnconfigure(1, weight=1)
 
         actions = ttk.LabelFrame(shell, text='Проверки', padding=10)
         actions.pack(fill='x')
@@ -195,6 +210,7 @@ class App:
 
     def open_generic_camera(self):
         window = tk.Toplevel(self.root)
+        window.after_idle(lambda w=window: self.size_for_contents(w, *w.minsize()))
         window.configure(bg=DARK['bg'])
         window.title(self.say('Други IP камери', 'Other IP cameras'))
         window.geometry('650x360')
@@ -266,6 +282,7 @@ class App:
             self.discovery_window.focus_set()
             return
         window = tk.Toplevel(self.root)
+        window.after_idle(lambda w=window: self.size_for_contents(w, *w.minsize()))
         self.discovery_window = window
         window.configure(bg=DARK['bg'])
         window.title(self.say('Търсене и мрежа', 'Discovery and network'))
@@ -409,6 +426,10 @@ class App:
                                            'collected': 'sensitive' in self.last_report,
                                            'username': self.report_username,
                                            'password': self.report_password}
+                    user, password, sources = confidential_fields(report['sensitive'])
+                    report['sensitive'].update(username=user, password=password)
+                    if sources:
+                        report['sensitive']['credential_sources'] = sources
                     if not report['sensitive'].get('stream_uris'):
                         messagebox.showinfo(
                             self.say('Няма RTSP адрес', 'No RTSP URI'),
@@ -456,6 +477,7 @@ class App:
             self.status.set(self.say(f'ONVIF потребителят е открит: {names[0]}', f'ONVIF username found: {names[0]}'))
         elif len(names) > 1:
             window = tk.Toplevel(self.root)
+            window.after_idle(lambda w=window: self.size_for_contents(w, *w.minsize()))
             window.configure(bg=DARK['bg'])
             window.title('Избери ONVIF потребител')
             window.geometry('480x180')
@@ -489,6 +511,7 @@ class App:
 
     def wifi_signals(self):
         window = tk.Toplevel(self.root)
+        window.after_idle(lambda w=window: self.size_for_contents(w, *w.minsize()))
         window.configure(bg=DARK['bg'])
         window.title('Видими Wi-Fi сигнали')
         window.geometry('700x520')
@@ -533,6 +556,7 @@ class App:
 
     def choose_ethernet(self, networks):
         window = tk.Toplevel(self.root)
+        window.after_idle(lambda w=window: self.size_for_contents(w, *w.minsize()))
         window.configure(bg=DARK['bg'])
         window.title('Избери кабелна мрежа')
         window.geometry('520x300')
@@ -594,6 +618,7 @@ class App:
         for ip, port in onvif:
             rows[(ip, str(port))] = ('ONVIF camera (WS-Discovery)' if english else 'ONVIF камера (WS-Discovery)', 'WS-Discovery')
         window = tk.Toplevel(self.root)
+        window.after_idle(lambda w=window: self.size_for_contents(w, *w.minsize()))
         window.configure(bg=DARK['bg'])
         window.title('Discovered devices' if english else 'Открити устройства')
         window.geometry('800x520')
@@ -633,6 +658,7 @@ class App:
 
     def remote_help(self):
         window = tk.Toplevel(self.root)
+        window.after_idle(lambda w=window: self.size_for_contents(w, *w.minsize()))
         window.configure(bg=DARK['bg'])
         window.title('Отдалечен достъп до домашните камери')
         window.geometry('650x480')
@@ -753,6 +779,7 @@ class App:
                         f'Открити отворени портове: {len(results)}. Непозната услуга не доказва, че устройството е камера.',
                         f'Open ports found: {len(results)}. An unknown service does not identify a camera.')
         window = tk.Toplevel(self.root)
+        window.after_idle(lambda w=window: self.size_for_contents(w, *w.minsize()))
         window.configure(bg=DARK['bg'])
         window.title('Открити услуги на камерата')
         window.geometry('660x390')
