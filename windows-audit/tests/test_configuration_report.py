@@ -32,6 +32,9 @@ class ConfigurationReportTests(unittest.TestCase):
         self.assertIn('Request Support', page)
         self.assertIn('&lt;mycam&gt;', page)
         self.assertEqual(page.count('target="_blank" rel="noopener noreferrer"'), 4)
+        self.assertEqual(page.count('href="https://necrotixlab.com/services" target="_blank"'), 2)
+        self.assertEqual(page.count('href="https://github.com/drnecrotix" target="_blank"'), 2)
+        self.assertIn('footer a,footer a:visited{color:#e8eef5', page)
 
 
 if __name__ == '__main__':
