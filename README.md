@@ -92,22 +92,22 @@ Switch <strong>BG / EN</strong> in the top right. Saved cameras keep IP, port an
 - Optional confidential export that includes stream URLs / the password currently typed — treat that file as a secret
 - Notes for Tailscale subnet routing so you can reach a home LAN without publishing ONVIF/RTSP to the Internet
 
-Full behavior, result fields and limits: [`windows-audit/README.md`](windows-audit/README.md).
+Full behavior, result fields, and limits: [`windows-audit/README.md`](windows-audit/README.md).
 
 ### CLI examples
 
 Replace IP and port with **your** camera.
 
 ```powershell
-py -3 audit.py 192.168.1.50 --port 80
-py -3 audit.py 192.168.1.50 --port 80 --video-test
-py -3 audit.py 192.168.1.50 --port 80 --view-video
+py -3 audit.py 192.***.*.** --port **
+py -3 audit.py 192.***.*.** --port ** --video-test
+py -3 audit.py 192.***.*.** --port ** --view-video
 ```
 
 `--move-test` sends a short opt-in PTZ command (0.3s + Stop). Watch the camera, keep the view clear, and run it only on hardware you are allowed to move.
 
 ```powershell
-py -3 audit.py 192.168.1.50 --port 80 --move-test
+py -3 audit.py 192.***.*.** --port ** --move-test
 ```
 
 ### Tests
