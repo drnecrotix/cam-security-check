@@ -17,6 +17,8 @@ import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
+from password_audit import assess
+from reporting import checklist
 from urllib.parse import urlparse
 from xml.sax.saxutils import escape
 
@@ -245,6 +247,7 @@ def main():
     p.add_argument('--port', type=int, default=80)
     p.add_argument('--timeout', type=float, default=4)
     p.add_argument('--move-test', action='store_true', help='Opt in to a short unauthenticated PTZ movement, then Stop')
+    p.add_argument('--full-audit', action='store_true', help='Run video access and offline password assessment; no PTZ movement')
     p.add_argument('--video-test', action='store_true', help='Check whether the RTSP video stream accepts an anonymous DESCRIBE')
     p.add_argument('--view-video', action='store_true', help='Open an anonymously accessible stream in VLC (implies --video-test)')
     p.add_argument('--username', help='ONVIF username for comparison with anonymous access')
@@ -297,9 +300,11 @@ def main():
               'video_profiles': [{k: v for k, v in item.items() if k != 'token'}
                                  for item in (auth_items if auth_items else anonymous_items)],
               'authenticated_stream_uri': None, 'authenticated_rtsp_describe': None,
-              'snapshot_saved': False, 'snapshot_error': None}
+              'snapshot_saved': False, 'snapshot_error': None,
+              'password_assessment': assess(credentials[1], credentials[0]) if credentials else {'checked': False},
+              'full_audit': a.full_audit}
     uri = None
-    if a.video_test or a.view_video or a.snapshot or credentials:
+    if a.video_test or a.full_audit or a.view_video or a.snapshot or credentials:
         if token:
             request = (f'<m:GetStreamUri xmlns:m="{MEDIA}" xmlns:t="http://www.onvif.org/ver10/schema">'
                        f'<m:StreamSetup><t:Stream>RTP-Unicast</t:Stream>'
@@ -361,6 +366,7 @@ def main():
                 time.sleep(0.3)
             finally:
                 result['stop_accepted'] = call(ptz_url, stop, a.timeout)['ok']
+    result['checklist'] = checklist(result)
     if a.report:
         with open(a.report, 'w', encoding='utf-8') as file:
             json.dump(result, file, indent=2, ensure_ascii=False)

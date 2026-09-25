@@ -11,19 +11,85 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from scan import DEFAULT_PORTS, parse_ports, scan_hosts
 from wifi_scan import nearby_networks
-from reporting import render_html
+from reporting import render_html, checklist
 from local_lan import ethernet_networks
 from audit import discover_usernames
+from device_discovery import discover_onvif, windows_neighbors
 
 CONFIG_PATH = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'CameraAudit' / 'cameras.json'
+
+DARK = {'bg': '#10151e', 'panel': '#1b2532', 'field': '#121c29',
+        'text': '#e8eef5', 'muted': '#a8b8c9', 'accent': '#35b7a8'}
+
+EN = {
+    'Проверка на ONVIF камера': 'ONVIF Camera Audit',
+    'Проверка на собствена камера': 'Audit your camera',
+    'Въведи локалния IP на камерата или намери камери в своята домашна мрежа.': 'Enter a local camera IP or discover cameras on your home network.',
+    'Запазени камери': 'Saved cameras', 'Запази': 'Save', 'Изтрий': 'Delete',
+    'IP адрес': 'IP address', 'ONVIF порт': 'ONVIF port',
+    'Име на камерата': 'Camera name', 'ONVIF потребител': 'ONVIF username',
+    'Парола (не се запазва)': 'Password (not saved)',
+    'Открий ONVIF потребител': 'Discover ONVIF username',
+    'Портове за търсене (може да намалиш списъка за по-бърза проверка)': 'Ports to check (reduce for a faster scan)',
+    'Намери портове': 'Find ports', 'Локален адрес или CIDR': 'Local address or CIDR',
+    'Намери камери': 'Find cameras', 'Открий кабелната LAN мрежа': 'Detect Ethernet LAN',
+    'Отдалечен достъп през Tailscale': 'Remote access via Tailscale',
+    'Видими Wi-Fi сигнали наблизо': 'Nearby Wi-Fi signals',
+    'Открий устройства и ONVIF камери': 'Discover devices and ONVIF cameras',
+    'Пълен отчет': 'Full audit', 'Провери достъпа': 'Check access', 'Провери видео': 'Check video',
+    'Покажи видео във VLC': 'View video in VLC', 'Снимка от видео': 'Take snapshot',
+    'Тествай PTZ движение': 'Test PTZ movement',
+    'Запази последния отчет': 'Save latest report',
+    'За видео е нужен VLC, а за снимка - FFmpeg. Паролата не се записва. При PTZ тест камерата може да се премести за кратко.': 'VLC is needed for video. Snapshots use ONVIF or FFmpeg fallback. The password is never saved. PTZ testing may move the camera briefly.',
+    'Камери': 'Cameras', 'Откриване': 'Discovery', 'Резултат': 'Results',
+    'Език': 'Language',
+    'Видими Wi-Fi сигнали': 'Visible Wi-Fi signals',
+    'Близки Wi-Fi мрежи - без свързване към тях': 'Nearby Wi-Fi networks - no connection required',
+    'Показва SSID, BSSID и сила на сигнала, когато Windows ги предоставя. Това не доказва, че мрежата е камера.': 'Shows SSID, BSSID and signal strength when Windows provides them. This does not identify a camera.',
+    'Обнови списъка': 'Refresh list',
+    'Отдалечен достъп до домашните камери': 'Remote access to home cameras',
+    'Генерирай команда': 'Generate command', 'Копирай': 'Copy',
+    'Провери връзката': 'Check connection', 'Отвори Tailscale инструкции': 'Open Tailscale instructions',
+    'Избери кабелна мрежа': 'Select Ethernet network',
+    'Активни Ethernet мрежи. Избери твоята домашна мрежа:': 'Active Ethernet networks. Select your home network:',
+    'Използвай тази мрежа': 'Use this network', 'Открити услуги на камерата': 'Discovered camera services',
+    'Избери ONVIF ред и натисни „Използвай адрес и порт“. Другите услуги са показани само за информация.': 'Select an ONVIF row and use its address and port. Other services are informational.',
+    'Порт': 'Port', 'Услуга': 'Service', 'Използвай адрес и порт': 'Use address and port',
+    'Избери ONVIF потребител': 'Select ONVIF username',
+    'Камерата върна няколко потребителя. Избери своя:': 'The camera returned several users. Select yours:',
+    'Използвай': 'Use',
+}
+
+
+def dark_style(root):
+    root.configure(bg=DARK['bg'])
+    style = ttk.Style(root)
+    style.theme_use('clam')
+    style.configure('.', background=DARK['bg'], foreground=DARK['text'], font=('Segoe UI', 10))
+    style.configure('TFrame', background=DARK['bg'])
+    style.configure('TLabel', background=DARK['bg'], foreground=DARK['text'])
+    style.configure('TButton', background=DARK['panel'], foreground=DARK['text'], padding=(10, 7), borderwidth=0)
+    style.map('TButton', background=[('active', '#284457'), ('disabled', '#26303b')],
+              foreground=[('disabled', DARK['muted'])])
+    style.configure('TEntry', fieldbackground=DARK['field'], foreground=DARK['text'], insertcolor=DARK['text'], padding=5)
+    style.configure('TCombobox', fieldbackground=DARK['field'], foreground=DARK['text'], background=DARK['panel'])
+    style.map('TCombobox', fieldbackground=[('readonly', DARK['field'])], foreground=[('readonly', DARK['text'])])
+    style.configure('TNotebook', background=DARK['bg'], borderwidth=0)
+    style.configure('TNotebook.Tab', background=DARK['panel'], foreground=DARK['muted'], padding=(18, 9))
+    style.map('TNotebook.Tab', background=[('selected', DARK['accent'])], foreground=[('selected', DARK['bg'])])
+    style.configure('Treeview', background=DARK['field'], foreground=DARK['text'], fieldbackground=DARK['field'], rowheight=25)
+    style.map('Treeview', background=[('selected', '#285d69')])
+    style.configure('Treeview.Heading', background=DARK['panel'], foreground=DARK['text'])
 
 
 class App:
     def __init__(self, root):
         self.root = root
+        self.language = tk.StringVar(value='BG')
+        dark_style(root)
         root.title('Проверка на ONVIF камера')
-        root.geometry('760x760')
-        root.minsize(640, 620)
+        root.geometry('860x710')
+        root.minsize(700, 600)
         self.ip = tk.StringVar()
         self.port = tk.StringVar(value='80')
         self.name = tk.StringVar()
@@ -35,10 +101,26 @@ class App:
         self.network = tk.StringVar()
         self.status = tk.StringVar(value='Въведи локалния IP адрес на твоята камера.')
 
-        frame = ttk.Frame(root, padding=18)
-        frame.pack(fill='both', expand=True)
-        ttk.Label(frame, text='Проверка на собствена камера', font=('Segoe UI', 17, 'bold')).pack(anchor='w')
-        ttk.Label(frame, text='Въведи локалния IP на камерата или намери камери в своята домашна мрежа.').pack(anchor='w', pady=(4, 16))
+        shell = ttk.Frame(root, padding=18)
+        shell.pack(fill='both', expand=True)
+        header = ttk.Frame(shell)
+        header.pack(fill='x')
+        ttk.Label(header, text='Проверка на собствена камера', font=('Segoe UI', 18, 'bold')).pack(side='left')
+        ttk.Label(header, text='Език').pack(side='right', padx=(8, 0))
+        language = ttk.Combobox(header, textvariable=self.language, values=['BG', 'EN'], width=4, state='readonly')
+        language.pack(side='right')
+        language.bind('<<ComboboxSelected>>', lambda event: self.apply_language())
+        ttk.Label(shell, text='Въведи локалния IP на камерата или намери камери в своята домашна мрежа.').pack(anchor='w', pady=(4, 16))
+
+        self.notebook = ttk.Notebook(shell)
+        self.notebook.pack(fill='both', expand=True)
+        self.camera_tab = ttk.Frame(self.notebook, padding=12)
+        self.discovery_tab = ttk.Frame(self.notebook, padding=12)
+        self.result_tab = ttk.Frame(self.notebook, padding=12)
+        self.notebook.add(self.camera_tab, text='Камери')
+        self.notebook.add(self.discovery_tab, text='Откриване')
+        self.notebook.add(self.result_tab, text='Резултат')
+        frame = self.camera_tab
 
         saved = ttk.Frame(frame)
         saved.pack(fill='x', pady=(0, 10))
@@ -69,7 +151,7 @@ class App:
             auth.columnconfigure(column, weight=1)
         ttk.Button(frame, text='Открий ONVIF потребител', command=self.discover_username_only).pack(anchor='w', pady=(6, 0))
 
-        discover = ttk.Frame(frame)
+        discover = ttk.Frame(self.discovery_tab)
         discover.pack(fill='x', pady=(12, 0))
         ttk.Label(discover, text='Портове за търсене (може да намалиш списъка за по-бърза проверка)').pack(anchor='w')
         line = ttk.Frame(discover)
@@ -86,11 +168,12 @@ class App:
         ttk.Button(discover, text='Открий кабелната LAN мрежа', command=self.find_ethernet).pack(anchor='w', pady=(8, 0))
         ttk.Button(discover, text='Отдалечен достъп през Tailscale', command=self.remote_help).pack(anchor='w', pady=(8, 0))
         ttk.Button(discover, text='Видими Wi-Fi сигнали наблизо', command=self.wifi_signals).pack(anchor='w', pady=(4, 0))
+        ttk.Button(discover, text='Открий устройства и ONVIF камери', command=self.discover_devices).pack(anchor='w', pady=(8, 0))
 
         buttons = ttk.Frame(frame)
         buttons.pack(fill='x', pady=(18, 12))
         self.buttons = []
-        for label, flag in [('Провери достъпа', None), ('Провери видео', '--video-test'),
+        for label, flag in [('Пълен отчет', '--full-audit'), ('Провери достъпа', None), ('Провери видео', '--video-test'),
                             ('Покажи видео във VLC', '--view-video'), ('Снимка от видео', '--snapshot'),
                             ('Тествай PTZ движение', '--move-test')]:
             button = ttk.Button(buttons, text=label, command=lambda f=flag: self.run(f))
@@ -98,11 +181,40 @@ class App:
             self.buttons.append(button)
         ttk.Button(buttons, text='Запази последния отчет', command=self.save_report).pack(fill='x', pady=3)
 
-        ttk.Label(frame, textvariable=self.status, wraplength=620).pack(anchor='w', pady=(3, 8))
-        self.output = tk.Text(frame, wrap='word', height=14, state='disabled', font=('Consolas', 10))
+        ttk.Label(shell, textvariable=self.status, wraplength=780).pack(anchor='w', pady=(12, 8))
+        self.output = tk.Text(self.result_tab, wrap='word', height=14, state='disabled', font=('Consolas', 10),
+                              bg=DARK['field'], fg=DARK['text'], insertbackground=DARK['text'],
+                              selectbackground='#285d69', relief='flat', padx=12, pady=12)
         self.output.pack(fill='both', expand=True)
-        ttk.Label(frame, text='За видео е нужен VLC, а за снимка - FFmpeg. Паролата не се записва. При PTZ тест камерата може да се премести за кратко.',
-                  wraplength=620).pack(anchor='w', pady=(10, 0))
+        ttk.Label(self.result_tab, text='За видео е нужен VLC, а за снимка - FFmpeg. Паролата не се записва. При PTZ тест камерата може да се премести за кратко.',
+                  wraplength=740).pack(anchor='w', pady=(10, 0))
+        self.apply_language()
+
+    def tr(self, text):
+        return EN.get(text, text) if self.language.get() == 'EN' else text
+
+    def say(self, bg, en):
+        return en if self.language.get() == 'EN' else bg
+
+    def apply_language(self):
+        self.root.title(self.tr('Проверка на ONVIF камера'))
+        def visit(widget):
+            try:
+                original = getattr(widget, '_original_bg_text', None)
+                if original is None:
+                    original = widget.cget('text')
+                    widget._original_bg_text = original
+                if original in EN:
+                    widget.configure(text=self.tr(original))
+            except (tk.TclError, AttributeError):
+                pass
+            for child in widget.winfo_children():
+                visit(child)
+        visit(self.root)
+        for index, bg in enumerate(('Камери', 'Откриване', 'Резултат')):
+            self.notebook.tab(index, text=self.tr(bg))
+        if self.last_report:
+            self.show(self.format_report(self.last_report))
 
     def load_cameras(self):
         try:
@@ -136,9 +248,10 @@ class App:
             CONFIG_PATH.write_text(json.dumps(self.cameras, ensure_ascii=False, indent=2), encoding='utf-8')
             self.camera_select.configure(values=[c['name'] for c in self.cameras])
             self.camera_select.set(name)
-            self.status.set('Камерата е запазена без паролата.')
+            self.status.set(self.say('Камерата е запазена без паролата.', 'Camera saved without the password.'))
         except (ValueError, OSError) as error:
-            messagebox.showerror('Неуспешно запазване', 'Въведи име, частен IP и валиден порт. ' + str(error))
+            messagebox.showerror(self.say('Неуспешно запазване', 'Save failed'),
+                                 self.say('Въведи име, частен IP и валиден порт. ', 'Enter a name, private IP and valid port. ') + str(error))
 
     def delete_camera(self):
         name = self.camera_select.get()
@@ -149,21 +262,22 @@ class App:
             CONFIG_PATH.write_text(json.dumps(self.cameras, ensure_ascii=False, indent=2), encoding='utf-8')
             self.camera_select.configure(values=[c['name'] for c in self.cameras])
             self.camera_select.set('')
-            self.status.set('Записът е изтрит.')
+            self.status.set(self.say('Записът е изтрит.', 'Camera record deleted.'))
         except OSError as error:
             messagebox.showerror('Грешка', str(error))
 
     def save_report(self):
         if not self.last_report:
-            messagebox.showinfo('Няма отчет', 'Първо изпълни проверка на камера.')
+            messagebox.showinfo(self.say('Няма отчет', 'No report'),
+                                self.say('Първо изпълни проверка на камера.', 'Run a camera check first.'))
             return
         path = filedialog.asksaveasfilename(defaultextension='.html', filetypes=[('HTML отчет', '*.html'), ('JSON данни', '*.json')])
         if path:
             try:
                 content = (json.dumps(self.last_report, ensure_ascii=False, indent=2)
-                           if path.lower().endswith('.json') else render_html(self.last_report))
+                           if path.lower().endswith('.json') else render_html(self.last_report, self.language.get()))
                 Path(path).write_text(content, encoding='utf-8')
-                self.status.set('Отчетът е записан без парола и видео адрес.')
+                self.status.set(self.say('Отчетът е записан без парола и видео адрес.', 'Report saved without password or stream URL.'))
             except OSError as error:
                 messagebox.showerror('Грешка', str(error))
 
@@ -178,12 +292,14 @@ class App:
             if ip.version != 4 or not ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or not 1 <= port <= 65535:
                 raise ValueError()
         except ValueError:
-            messagebox.showerror('Невалиден адрес', 'Първо въведи локалния IP адрес и ONVIF порта на камерата.')
+            messagebox.showerror(self.say('Невалиден адрес', 'Invalid address'),
+                                 self.say('Първо въведи локалния IP адрес и ONVIF порта на камерата.', 'Enter the local camera IP and ONVIF port first.'))
             return
         self.lookup_username(str(ip), port, None, resume=False)
 
     def lookup_username(self, ip, port, pending_flag, resume):
-        self.status.set('Проверявам дали камерата предоставя ONVIF потребителите без парола...')
+        self.status.set(self.say('Проверявам дали камерата предоставя ONVIF потребителите без парола...',
+                                 'Checking whether the camera exposes ONVIF users without a password...'))
         def worker():
             try:
                 names = discover_usernames(ip, port)
@@ -196,9 +312,10 @@ class App:
     def username_found(self, names, pending_flag, resume, error=None):
         if len(names) == 1:
             self.username.set(names[0])
-            self.status.set(f'ONVIF потребителят е открит: {names[0]}')
+            self.status.set(self.say(f'ONVIF потребителят е открит: {names[0]}', f'ONVIF username found: {names[0]}'))
         elif len(names) > 1:
             window = tk.Toplevel(self.root)
+            window.configure(bg=DARK['bg'])
             window.title('Избери ONVIF потребител')
             box = ttk.Frame(window, padding=14)
             box.pack(fill='both', expand=True)
@@ -212,9 +329,11 @@ class App:
                 if resume:
                     self.run(pending_flag, resolved=True)
             ttk.Button(box, text='Използвай', command=select).pack()
+            self.apply_language()
             return
         else:
-            self.status.set('Камерата не предоставя потребителски имена без удостоверяване.' +
+            self.status.set(self.say('Камерата не предоставя потребителски имена без удостоверяване.',
+                                     'The camera does not disclose usernames without authentication.') +
                             (f' {error}' if error else ''))
         if resume:
             self.run(pending_flag, resolved=True)
@@ -227,6 +346,7 @@ class App:
 
     def wifi_signals(self):
         window = tk.Toplevel(self.root)
+        window.configure(bg=DARK['bg'])
         window.title('Видими Wi-Fi сигнали')
         window.geometry('700x520')
         box = ttk.Frame(window, padding=14)
@@ -234,7 +354,7 @@ class App:
         ttk.Label(box, text='Близки Wi-Fi мрежи - без свързване към тях', font=('Segoe UI', 13, 'bold')).pack(anchor='w')
         ttk.Label(box, text='Показва SSID, BSSID и сила на сигнала, когато Windows ги предоставя. Това не доказва, че мрежата е камера.',
                   wraplength=650).pack(anchor='w', pady=(4, 10))
-        view = tk.Text(box, wrap='none', font=('Consolas', 10))
+        view = tk.Text(box, wrap='none', font=('Consolas', 10), bg=DARK['field'], fg=DARK['text'], relief='flat')
         view.pack(fill='both', expand=True)
 
         def update():
@@ -253,10 +373,11 @@ class App:
             threading.Thread(target=worker, daemon=True).start()
 
         ttk.Button(box, text='Обнови списъка', command=update).pack(anchor='e', pady=(8, 0))
+        self.apply_language()
         update()
 
     def find_ethernet(self):
-        self.status.set('Откривам активната кабелна мрежа...')
+        self.status.set(self.say('Откривам активната кабелна мрежа...', 'Detecting the active Ethernet LAN...'))
         def worker():
             try:
                 networks = ethernet_networks()
@@ -268,12 +389,13 @@ class App:
 
     def choose_ethernet(self, networks):
         window = tk.Toplevel(self.root)
+        window.configure(bg=DARK['bg'])
         window.title('Избери кабелна мрежа')
         window.geometry('500x250')
         box = ttk.Frame(window, padding=14)
         box.pack(fill='both', expand=True)
         ttk.Label(box, text='Активни Ethernet мрежи. Избери твоята домашна мрежа:', wraplength=460).pack(anchor='w')
-        listbox = tk.Listbox(box)
+        listbox = tk.Listbox(box, bg=DARK['field'], fg=DARK['text'], selectbackground='#285d69', relief='flat')
         listbox.pack(fill='both', expand=True, pady=10)
         for name, ip, network in networks:
             listbox.insert('end', f'{name} - {ip} - {network}')
@@ -284,12 +406,85 @@ class App:
                 return
             _, ip, network = networks[selection[0]]
             self.network.set(network)
-            self.status.set(f'Открита LAN мрежа {network} (адрес на компютъра: {ip}). Натисни „Намери камери“.')
+            self.status.set(self.say(f'Открита LAN мрежа {network} (адрес на компютъра: {ip}). Натисни „Намери камери“.',
+                                     f'LAN {network} found (computer IP: {ip}). Select Find cameras.'))
             window.destroy()
         ttk.Button(box, text='Използвай тази мрежа', command=choose).pack(anchor='e')
+        self.apply_language()
+
+    def discover_devices(self):
+        try:
+            raw = self.network.get().strip()
+            network = ipaddress.ip_network(raw if '/' in raw else raw + '/24', strict=False)
+            ports = parse_ports(self.scan_ports.get())
+            if (network.version != 4 or not network.is_private or network.num_addresses > 256 or
+                    len(list(network.hosts())) * len(ports) > 2048):
+                raise ValueError()
+        except ValueError:
+            messagebox.showerror('Невалидна локална мрежа' if self.language.get() == 'BG' else 'Invalid local network',
+                                 'Въведи частен LAN адрес или CIDR до /24 и намали портовете при нужда.' if self.language.get() == 'BG'
+                                 else 'Enter a private LAN address or CIDR up to /24 and reduce ports if needed.')
+            return
+        self.status.set('Откривам устройства и ONVIF камери...' if self.language.get() == 'BG' else 'Discovering devices and ONVIF cameras...')
+        def worker():
+            try:
+                onvif = discover_onvif(network)
+            except (OSError, ValueError):
+                onvif = []
+            try:
+                open_ports = scan_hosts([str(ip) for ip in network.hosts()], ports)
+            except (OSError, ValueError):
+                open_ports = []
+            neighbors = windows_neighbors(network)
+            self.root.after(0, lambda: self.show_devices(onvif, open_ports, neighbors))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def show_devices(self, onvif, open_ports, neighbors):
+        english = self.language.get() == 'EN'
+        rows = {}
+        for ip, mac in neighbors:
+            rows[(ip, '-')]= ('LAN neighbor' if english else 'LAN устройство', 'ARP')
+        for ip, port, service in open_ports:
+            rows[(ip, str(port))] = (service, 'TCP')
+        for ip, port in onvif:
+            rows[(ip, str(port))] = ('ONVIF camera (WS-Discovery)' if english else 'ONVIF камера (WS-Discovery)', 'WS-Discovery')
+        window = tk.Toplevel(self.root)
+        window.configure(bg=DARK['bg'])
+        window.title('Discovered devices' if english else 'Открити устройства')
+        window.geometry('780x500')
+        box = ttk.Frame(window, padding=14)
+        box.pack(fill='both', expand=True)
+        ttk.Label(box, text=('Select an ONVIF row to use it. ARP entries may be stale; an open port alone does not identify a camera.'
+                             if english else 'Избери ONVIF ред. ARP записите може да са стари; отворен порт сам по себе си не доказва, че устройството е камера.'),
+                  wraplength=740).pack(anchor='w', pady=(0, 8))
+        tree = ttk.Treeview(box, columns=('ip','port','service','source'), show='headings', selectmode='browse')
+        for key, bg, en, width in [('ip','IP адрес','IP address',150),('port','Порт','Port',70),
+                                    ('service','Услуга','Service',390),('source','Източник','Source',130)]:
+            tree.heading(key, text=en if english else bg)
+            tree.column(key, width=width)
+        tree.pack(fill='both', expand=True)
+        for (ip, port), (service, source) in sorted(rows.items(), key=lambda row: (ipaddress.ip_address(row[0][0]), row[0][1])):
+            tree.insert('', 'end', values=(ip, port, service, source))
+        def choose():
+            selected = tree.selection()
+            if not selected:
+                return
+            ip, port, service, source = tree.item(selected[0], 'values')
+            if source != 'WS-Discovery' and not service.startswith('ONVIF'):
+                self.ip.set(ip)
+                self.status.set('IP е попълнен, но ONVIF портът не е потвърден.' if not english else 'IP filled; ONVIF port is not confirmed.')
+            else:
+                self.ip.set(ip)
+                self.port.set(port)
+                self.status.set(f'ONVIF: {ip}:{port}')
+            self.notebook.select(self.camera_tab)
+            window.destroy()
+        ttk.Button(box, text='Use selected' if english else 'Използвай избраното', command=choose).pack(anchor='e', pady=(8, 0))
+        self.status.set(f'{len(rows)} ' + ('entries found.' if english else 'записа са открити.'))
 
     def remote_help(self):
         window = tk.Toplevel(self.root)
+        window.configure(bg=DARK['bg'])
         window.title('Отдалечен достъп до домашните камери')
         window.geometry('610x390')
         box = ttk.Frame(window, padding=18)
@@ -299,7 +494,12 @@ class App:
                  '3. Одобри маршрута в Tailscale Admin Console > Machines > Edit route settings.\n'
                  '4. Инсталирай Tailscale на отдалечения компютър и влез в същия акаунт.\n'
                  '5. След свързване въведи домашния адрес, например 192.168.0.1, и натисни „Намери камери“.')
-        ttk.Label(box, text=guide, wraplength=560, justify='left').pack(anchor='w', pady=(0, 12))
+        guide_en = ('1. Install Tailscale on the always-on Windows computer at home and sign in.\n'
+                    '2. Enter your home network in the main window. On the home computer, run the generated command in Administrator PowerShell.\n'
+                    '3. Approve the subnet route in Tailscale Admin Console > Machines > Edit route settings.\n'
+                    '4. Install Tailscale on the remote computer and sign in with the same account.\n'
+                    '5. Connect, enter a home address such as 192.168.0.1, then select Find cameras.')
+        ttk.Label(box, text=self.say(guide, guide_en), wraplength=560, justify='left').pack(anchor='w', pady=(0, 12))
         command = tk.StringVar(value='Въведи валидна домашна мрежа в главния прозорец.')
         ttk.Entry(box, textvariable=command, state='readonly').pack(fill='x')
         status = tk.StringVar(value='')
@@ -312,7 +512,8 @@ class App:
                     raise ValueError()
                 command.set(f'tailscale up --advertise-routes={network}')
             except ValueError:
-                command.set('Въведи домашен адрес, например 192.168.0.1, или точната мрежа в CIDR формат.')
+                command.set(self.say('Въведи домашен адрес, например 192.168.0.1, или точната мрежа в CIDR формат.',
+                                     'Enter a home address such as 192.168.0.1 or the exact CIDR network.'))
 
         def copy():
             if not command.get().startswith('tailscale up '):
@@ -320,15 +521,17 @@ class App:
             if command.get().startswith('tailscale up '):
                 window.clipboard_clear()
                 window.clipboard_append(command.get())
-                status.set('Командата е копирана. Изпълни я само на домашния компютър.')
+                status.set(self.say('Командата е копирана. Изпълни я само на домашния компютър.',
+                                    'Command copied. Run it only on the home computer.'))
 
         def check():
             try:
                 result = subprocess.run(['tailscale', 'status'], capture_output=True, timeout=5)
-                status.set('Tailscale е активен на този компютър.' if result.returncode == 0 else
-                           'Tailscale е инсталиран, но няма активна връзка.')
+                status.set(self.say('Tailscale е активен на този компютър.', 'Tailscale is active on this computer.') if result.returncode == 0 else
+                           self.say('Tailscale е инсталиран, но няма активна връзка.', 'Tailscale is installed but not connected.'))
             except (OSError, subprocess.TimeoutExpired):
-                status.set('Tailscale не е открит или не отговаря на този компютър.')
+                status.set(self.say('Tailscale не е открит или не отговаря на този компютър.',
+                                    'Tailscale was not found or is not responding on this computer.'))
 
         buttons = ttk.Frame(box)
         buttons.pack(fill='x', pady=(10, 8))
@@ -337,6 +540,7 @@ class App:
                               ('Отвори Tailscale инструкции', lambda: webbrowser.open('https://tailscale.com/docs/use-cases/personal-or-at-home-use/access-devices-without-tailscale?tab=windows'))]:
             ttk.Button(buttons, text=label, command=action).pack(anchor='w', pady=2)
         ttk.Label(box, textvariable=status, wraplength=560).pack(anchor='w')
+        self.apply_language()
         generate()
 
     def start_scan(self, network_mode=False):
@@ -358,11 +562,12 @@ class App:
             if len(addresses) * len(ports) > 2048:
                 raise ValueError('Намали списъка с портове до най-много 2048 проверки общо.')
         except ValueError as error:
-            messagebox.showerror('Невалиден адрес или портове', str(error))
+            messagebox.showerror(self.say('Невалиден адрес или портове', 'Invalid address or ports'), str(error))
             return
         self.scan_button.configure(state='disabled')
         self.network_button.configure(state='disabled')
-        self.status.set(f'Търся услуги на {len(addresses)} адреса и {len(ports)} порта. Това може да отнеме около минута...')
+        self.status.set(self.say(f'Търся услуги на {len(addresses)} адреса и {len(ports)} порта. Това може да отнеме около минута...',
+                                 f'Checking {len(addresses)} addresses and {len(ports)} ports. This may take about a minute...'))
         threading.Thread(target=self.scan_worker, args=(addresses, ports), daemon=True).start()
 
     def scan_worker(self, addresses, ports):
@@ -376,13 +581,15 @@ class App:
     def scan_failed(self, message):
         self.scan_button.configure(state='normal')
         self.network_button.configure(state='normal')
-        self.status.set('Търсенето не успя: ' + message)
+        self.status.set(self.say('Търсенето не успя: ', 'Discovery failed: ') + message)
 
     def show_scan(self, results):
         self.scan_button.configure(state='normal')
         self.network_button.configure(state='normal')
-        self.status.set(f'Открити отворени портове: {len(results)}. Непозната услуга не доказва, че устройството е камера.')
+        self.status.set(self.say(f'Открити отворени портове: {len(results)}. Непозната услуга не доказва, че устройството е камера.',
+                                 f'Open ports found: {len(results)}. An unknown service does not identify a camera.'))
         window = tk.Toplevel(self.root)
+        window.configure(bg=DARK['bg'])
         window.title('Открити услуги на камерата')
         window.geometry('600x320')
         box = ttk.Frame(window, padding=14)
@@ -403,13 +610,15 @@ class App:
                 return
             ip, port, service = tree.item(selected[0], 'values')
             if not service.startswith('ONVIF'):
-                messagebox.showinfo('Друг тип услуга', 'Този порт не е потвърден като ONVIF порт.')
+                messagebox.showinfo(self.say('Друг тип услуга', 'Other service'),
+                                    self.say('Този порт не е потвърден като ONVIF порт.', 'This port is not confirmed as ONVIF.'))
                 return
             self.ip.set(ip)
             self.port.set(port)
             window.destroy()
 
         ttk.Button(box, text='Използвай адрес и порт', command=choose).pack(anchor='e', pady=(8, 0))
+        self.apply_language()
 
     def run(self, flag, resolved=False):
         try:
@@ -418,7 +627,9 @@ class App:
             if ip.version != 4 or not ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or not 1 <= port <= 65535:
                 raise ValueError()
         except ValueError:
-            messagebox.showerror('Невалиден адрес', 'Въведи локалния IP на камерата, например 192.168.0.50, и ONVIF порт от 1 до 65535. Публичният IP на рутера не е адрес на камерата. Ако си извън дома, свържи се през Tailscale.')
+            messagebox.showerror(self.say('Невалиден адрес', 'Invalid address'),
+                                 self.say('Въведи локалния IP на камерата, например 192.168.0.50, и ONVIF порт от 1 до 65535. Публичният IP на рутера не е адрес на камерата. Ако си извън дома, свържи се през Tailscale.',
+                                          'Enter a local camera IP such as 192.168.0.50 and an ONVIF port from 1 to 65535. Your router public IP is not the camera address. Connect through Tailscale when away from home.'))
             return
         if not self.username.get().strip() and not resolved:
             saved = self.saved_username(ip, port)
@@ -427,18 +638,20 @@ class App:
             else:
                 self.lookup_username(str(ip), port, flag, resume=True)
                 return
-        if flag == '--move-test' and not messagebox.askyesno('PTZ движение',
-                'Камерата може да се премести за кратко. Наблюдавай я и продължи само ако е твоя или имаш разрешение.'):
+        if flag == '--move-test' and not messagebox.askyesno(self.say('PTZ движение', 'PTZ movement'),
+                self.say('Камерата може да се премести за кратко. Наблюдавай я и продължи само ако е твоя или имаш разрешение.',
+                         'The camera may move briefly. Watch it and continue only if you own it or have permission.')):
             return
         if self.password.get() and not self.username.get().strip():
-            messagebox.showerror('Липсва потребител', 'Въведи ONVIF потребител за тази парола.')
+            messagebox.showerror(self.say('Липсва потребител', 'Username missing'),
+                                 self.say('Въведи ONVIF потребител за тази парола.', 'Enter an ONVIF username for this password.'))
             return
         if flag == '--snapshot':
             destination = filedialog.asksaveasfilename(defaultextension='.jpg', filetypes=[('JPEG снимка', '*.jpg')])
             if not destination:
                 return
-        self.status.set('Проверявам камерата...')
-        self.show('Свързване...')
+        self.status.set(self.say('Проверявам камерата...', 'Checking camera...'))
+        self.show(self.say('Свързване...', 'Connecting...'))
         for button in self.buttons:
             button.configure(state='disabled')
         args = [sys.executable, str(Path(__file__).with_name('audit.py')), str(ip), '--port', str(port)]
@@ -460,35 +673,7 @@ class App:
             report = None
             if start >= 0:
                 report, _ = json.JSONDecoder().raw_decode(raw[start:])
-                lines = [f"Камера: {report['target']}:{report['port']}",
-                         f"ONVIF без парола: {'Да' if report['anonymous_capabilities'] else 'Не е потвърдено'}",
-                         f"Профили без парола: {'Да' if report['anonymous_profiles'] else 'Не е потвърдено'}",
-                         f"PTZ статус без парола: {'Да' if report['anonymous_ptz_status'] else 'Не е потвърдено'}"]
-                if report.get('authenticated'):
-                    lines += [f"ONVIF заявка с данни: {'Успешна' if report.get('authenticated_capabilities') else 'Неуспешна'}",
-                              f"Профили с данни: {'Успешна' if report.get('authenticated_profiles') else 'Неуспешна'}",
-                              f"PTZ статус с данни: {'Успешна' if report.get('authenticated_ptz_status') else 'Неуспешна'}",
-                              f"Адрес за видео с данни: {'Успешна' if report.get('authenticated_stream_uri') else 'Неуспешна'}",
-                              f"RTSP с данни: {report.get('authenticated_rtsp_describe') or 'Няма отговор'}",
-                              'Ако същата заявка работи без парола, успехът не доказва, че акаунтът е проверен.']
-                items = report.get('video_profiles', [])
-                if items:
-                    lines.append('')
-                    lines.append('Видео профили:')
-                    for item in items:
-                        resolution = f"{item.get('width') or '?'}x{item.get('height') or '?'}"
-                        lines.append(f" - {item.get('name') or 'Без име'}: {resolution}, {item.get('codec') or 'неизвестен кодек'}")
-                if '--video-test' in args or '--view-video' in args or '--snapshot' in args:
-                    lines += [f"Адрес за видео без парола: {'Да' if report['anonymous_stream_uri'] else 'Не е потвърдено'}",
-                              f"Отговор на RTSP: {report['rtsp_describe'] or 'Няма'}",
-                              f"VLC е стартиран: {'Да' if report['viewer_started'] else 'Не'}"]
-                if '--snapshot' in args:
-                    lines.append(f"Снимка: {'Записана' if report.get('snapshot_saved') else report.get('snapshot_error') or 'Не е достъпна без парола'}")
-                if '--move-test' in args:
-                    lines += [f"Команда за движение приета: {'Да' if report['movement_accepted'] else 'Не'}",
-                              f"Команда за спиране приета: {'Да' if report['stop_accepted'] else 'Не'}"]
-                lines += ['', 'Потвърди видимо движение или картина. Отрицателен тест не доказва пълна защита.']
-                result = '\n'.join(lines)
+                result = ''
             else:
                 result = raw or f'Проверката приключи с код {process.returncode}.'
             self.root.after(0, lambda: self.finish(result, report))
@@ -498,10 +683,47 @@ class App:
 
     def finish(self, result, report=None):
         self.last_report = report
-        self.show(result)
-        self.status.set('Проверката приключи.')
+        self.show(self.format_report(report) if report else result)
+        self.status.set('Audit finished.' if self.language.get() == 'EN' else 'Проверката приключи.')
+        self.notebook.select(self.result_tab)
         for button in self.buttons:
             button.configure(state='normal')
+
+    def format_report(self, report):
+        english = self.language.get() == 'EN'
+        yes = lambda value: ('Yes' if value else 'Not confirmed') if english else ('Да' if value else 'Не е потвърдено')
+        label = (lambda bg, en: en if english else bg)
+        lines = [f"{label('Камера', 'Camera')}: {report['target']}:{report['port']}",
+                 f"{label('ONVIF без парола', 'ONVIF without password')}: {yes(report.get('anonymous_capabilities'))}",
+                 f"{label('Профили без парола', 'Profiles without password')}: {yes(report.get('anonymous_profiles'))}",
+                 f"{label('PTZ статус без парола', 'PTZ status without password')}: {yes(report.get('anonymous_ptz_status'))}"]
+        if report.get('authenticated'):
+            for key, bg, en in [('authenticated_capabilities', 'ONVIF с данни', 'ONVIF with credentials'),
+                                ('authenticated_profiles', 'Профили с данни', 'Profiles with credentials'),
+                                ('authenticated_ptz_status', 'PTZ статус с данни', 'PTZ with credentials'),
+                                ('authenticated_stream_uri', 'Адрес за видео с данни', 'Video URI with credentials')]:
+                lines.append(f'{label(bg, en)}: {yes(report.get(key))}')
+            lines.append(f"{label('RTSP с данни', 'RTSP with credentials')}: {report.get('authenticated_rtsp_describe') or '-'}")
+        if report.get('video_profiles'):
+            lines += ['', label('Видео профили:', 'Video profiles:')]
+            for item in report['video_profiles']:
+                lines.append(f" - {item.get('name') or '?'}: {item.get('width') or '?'}x{item.get('height') or '?'}, {item.get('codec') or '?'}")
+        if report.get('rtsp_describe') is not None or report.get('anonymous_stream_uri'):
+            lines += [f"{label('Видео без парола', 'Video without password')}: {yes(report.get('anonymous_stream_uri'))}",
+                      f"RTSP: {report.get('rtsp_describe') or '-'}"]
+        if report.get('snapshot_saved') or report.get('snapshot_error'):
+            lines.append(f"{label('Снимка', 'Snapshot')}: {label('Записана', 'Saved') if report.get('snapshot_saved') else report.get('snapshot_error')}")
+        if report.get('movement_attempted'):
+            lines.append(f"{label('PTZ движение прието', 'PTZ move accepted')}: {yes(report.get('movement_accepted'))}")
+        lines += ['', label('Подробен списък и слаби места:', 'Detailed checklist and weaknesses:')]
+        for item in report.get('checklist') or checklist(report):
+            local = item['en' if english else 'bg']
+            lines.append(f" - {local['title']}: {local['status']} [{local['risk']}]")
+            lines.append(f"   {local['evidence']}")
+            lines.append(f"   {local['action']}")
+        lines += ['', label('Отрицателен тест не доказва пълна защита. Успех с данни не доказва проверена парола, ако анонимната заявка също работи.',
+                             'A negative test does not prove security. A credentialed success does not prove the password was checked when anonymous access also works.')]
+        return '\n'.join(lines)
 
 
 if __name__ == '__main__':

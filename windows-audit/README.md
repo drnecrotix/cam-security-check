@@ -6,6 +6,8 @@ This small tool checks one camera on your private LAN for anonymous ONVIF access
 
 Install Python 3 for Windows and double-click `START-WINDOWS.bat`. Enter the camera's private IP address and ONVIF port, then use the buttons. Install VLC if you want to view video. The interface uses only built-in Python modules.
 
+The interface uses a dark theme and three tabs: Cameras, Discovery and Results. Switch **BG/EN** in the top right; exported HTML follows the selected language.
+
 Give the camera a name and press **Запази** to keep its IP, port and ONVIF username for next time. The password is not saved. Enter the password to compare authenticated ONVIF capabilities, profiles, PTZ status and stream URI access against anonymous responses. The tool uses ONVIF WS-Security UsernameToken digest or HTTP Digest authentication; a camera with another scheme may need a device-specific adapter. Passwords are read through standard input, not command-line arguments.
 
 When the ONVIF username field is blank, the app first checks a saved camera with the same IP and port, then sends an anonymous ONVIF `GetUsers` request. If exactly one username is returned, it fills the field; if several are returned, you choose. Properly protected cameras normally reject anonymous `GetUsers`, so the username must then be entered manually. This function does not try default usernames or guess passwords.
@@ -17,6 +19,8 @@ If you do not know the ONVIF port, enter the camera's IP and press **Намер�
 If you do not know the camera IP, enter a local address such as `192.168.0.1` and press **Намери камери**. The tool assumes `/24` for a bare address; you can enter the actual network such as `192.168.0.0/24` instead. The result lists IP, port, and service; choosing an ONVIF row fills both fields. A search is capped at 254 addresses and 2048 IP/port checks and can take a while. Check your router's actual LAN range and scan only networks you control. A public router WAN address is not the camera's local address.
 
 For a desktop connected by Ethernet, press **Открий кабелната LAN мрежа**. Windows reports the active physical Ethernet adapters and IPv4 prefixes. Select the home network, then press **Намери камери**. A Wi-Fi adapter is not required. This lists open ports and recognized ONVIF/RTSP services; a router or another device can also have an open port, so an open port alone does not identify a camera.
+
+The **Открий устройства и ONVIF камери** button combines a bounded TCP port check, local ONVIF WS-Discovery multicast, and Windows neighbor entries on the selected private LAN (up to `/24`). WS-Discovery may locate ONVIF devices using an unlisted port. Neighbor entries may be stale and do not prove the device is a camera. Multicast discovery normally stays on the local LAN and may not work over Tailscale; the TCP scan can still use a routed subnet.
 
 ## Away from home: Tailscale subnet routing
 
@@ -78,3 +82,9 @@ The tool asks ONVIF for a stream URI, sends an anonymous RTSP `DESCRIBE`, and op
 - A failed test is not a comprehensive security assessment.
 
 If movement is exposed, update camera firmware, enable ONVIF authentication where supported, disable ONVIF if unused, block Internet exposure and restrict access to trusted LAN devices. Change default credentials.
+
+### Full audit and password check
+
+Use **Пълен отчет / Full audit** for anonymous ONVIF and RTSP video checks, an authenticated comparison when you enter credentials, video profiles, and a detailed checklist with evidence, risk and actions. Save the report as HTML or JSON. PTZ movement and snapshot capture remain separate explicit actions.
+
+The entered password is assessed offline for length, predictable patterns and a small built-in list of common values. The tool does not attempt password guessing against the camera. This heuristic is not a breach database check or proof that a password cannot be guessed. Password text is omitted from reports and saved camera entries. A successful credentialed request does not establish that authentication was enforced when the same anonymous operation succeeds.
