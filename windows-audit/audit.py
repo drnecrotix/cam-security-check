@@ -83,6 +83,43 @@ def first_text(root, local):
     return next((e.text for e in root.iter() if e.tag.endswith('}' + local) and e.text), None)
 
 
+def wireless_information(device, timeout, credentials=None):
+    """Read ONVIF Wi-Fi status only; never include PSK/passphrase elements."""
+    response = call(device, f'<d:GetNetworkInterfaces xmlns:d="{DEV}"/>', timeout, credentials)
+    if not response['ok'] or response['root'] is None:
+        return [], []
+    interfaces, wireless = [], []
+    for node in response['root'].iter():
+        if not node.tag.endswith('}NetworkInterfaces'):
+            continue
+        token = node.attrib.get('token', '')
+        info = next((x for x in node if x.tag.endswith('}Info')), None)
+        entry = {'name': (first_text(info, 'Name') or '')[:80],
+                 'mac': (first_text(info, 'HwAddress') or '')[:32],
+                 'addresses': list(dict.fromkeys((x.text or '')[:45] for x in node.iter()
+                            if x.tag.endswith('}Address') and x.text))[:8]}
+        interfaces.append(entry)
+        dot11 = [x for x in node.iter() if x.tag.endswith('}Dot11')]
+        for config in dot11[:4]:
+            ssid = first_text(config, 'SSID')
+            if ssid:
+                wireless.append({'interface': entry['name'], 'ssid': ssid[:80], 'source': 'GetNetworkInterfaces'})
+        if token and (dot11 or first_text(node, 'InterfaceType') == '71'):
+            request = (f'<d:GetDot11Status xmlns:d="{DEV}">'
+                       f'<d:InterfaceToken>{escape(token)}</d:InterfaceToken></d:GetDot11Status>')
+            status = call(device, request, timeout, credentials)
+            if status['ok'] and status['root'] is not None:
+                state = next((x for x in status['root'].iter() if x.tag.endswith('}Status')), None)
+                ssid = first_text(state, 'SSID')
+                if ssid:
+                    wireless = [x for x in wireless if x['interface'] != entry['name']]
+                    wireless.append({'interface': entry['name'], 'ssid': ssid[:80],
+                                     'bssid': (first_text(state, 'BSSID') or '')[:40],
+                                     'signal': (first_text(state, 'SignalStrength') or '')[:40],
+                                     'source': 'GetDot11Status'})
+    return interfaces[:8], wireless[:8]
+
+
 def profile_list(root):
     items = []
     if root is None:
@@ -280,6 +317,8 @@ def main():
     ptz_url = service_url(service_root, 'PTZ', base + '/onvif/ptz_service', ip)
     info = call(device, f'<d:GetDeviceInformation xmlns:d="{DEV}"/>', a.timeout,
                 credentials if auth_caps and auth_caps['ok'] else None)
+    network_interfaces, wireless = wireless_information(
+        device, a.timeout, credentials if auth_caps and auth_caps['ok'] else None)
     profiles = call(media_url, f'<m:GetProfiles xmlns:m="{MEDIA}"/>', a.timeout)
     auth_profiles = call(media_url, f'<m:GetProfiles xmlns:m="{MEDIA}"/>', a.timeout, credentials) if credentials else None
     anonymous_items = profile_list(profiles['root']) if profiles['ok'] else []
@@ -297,6 +336,7 @@ def main():
               'http_status': {'capabilities': caps['status'], 'profiles': profiles['status'], 'ptz': status['status'] if status else None},
               'device_information': {key: (first_text(info['root'], key) or '')[:120] for key in
                                      ('Manufacturer', 'Model', 'FirmwareVersion', 'SerialNumber', 'HardwareId')} if info['ok'] else {},
+              'network_interfaces': network_interfaces, 'wireless_interfaces': wireless,
               'movement_attempted': False, 'movement_accepted': None, 'stop_accepted': None,
               'anonymous_stream_uri': False, 'stream_uri_http_status': None, 'rtsp_describe': None, 'viewer_started': False,
               'authenticated': bool(credentials),
