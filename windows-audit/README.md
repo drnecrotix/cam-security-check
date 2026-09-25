@@ -88,3 +88,9 @@ If movement is exposed, update camera firmware, enable ONVIF authentication wher
 Use **Пълен отчет / Full audit** for anonymous ONVIF and RTSP video checks, an authenticated comparison when you enter credentials, video profiles, and a detailed checklist with evidence, risk and actions. Save the report as HTML or JSON. PTZ movement and snapshot capture remain separate explicit actions.
 
 The entered password is assessed offline for length, predictable patterns and a small built-in list of common values. The tool does not attempt password guessing against the camera. This heuristic is not a breach database check or proof that a password cannot be guessed. Password text is omitted from reports and saved camera entries. A successful credentialed request does not establish that authentication was enforced when the same anonymous operation succeeds.
+
+### Dashboard layout
+
+The main window keeps camera details, checks and the scrollable result console visible together. **Търсене и мрежа / Discovery and network** opens the LAN, port and nearby Wi-Fi tools in a separate window. Discovered camera addresses fill the main dashboard. The discovery window can be closed during a scan without breaking the controls.
+
+The status dot is yellow while a check or search is running, green when an ONVIF check succeeds or discovery finds entries, and red on errors or empty discovery. A remote host may close an individual TCP connection during a scan; other ports continue to be checked. Windows enforce minimum window sizes so action buttons remain visible. Exported HTML reports place a plain-language priority summary before the detailed checks and include `dev: dr.necrotix` at the bottom right.
