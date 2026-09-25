@@ -11,9 +11,9 @@
 
 <p align="center">
   <a href="windows-audit/README.md">Windows audit docs</a>
-  ·
+  &middot;
   <a href="#disclaimer">Disclaimer</a>
-  ·
+  &middot;
   <a href="https://github.com/drnecrotix">dr.necrotix</a>
 </p>
 
@@ -34,17 +34,20 @@ This project is a **diagnostic** for cameras you administer. It is not a scannin
 
 ## Preview
 
-Dashboard (BG) with discovery and open services:
+<p align="center">
+  <img src="docs/Assets/Screenshot%202026-09-26%20021555.png" alt="Windows dashboard — Bulgarian UI, discovery and open services" width="900">
+</p>
+<p align="center"><em>Dashboard (BG) — discovery and open services</em></p>
 
-![Windows dashboard — Bulgarian UI, discovery and open services](docs/Assets/Screenshot%202026-09-26%20021555.png)
+<p align="center">
+  <img src="docs/Assets/Screenshot%202026-09-26%20021809.png" alt="Windows dashboard — English UI" width="900">
+</p>
+<p align="center"><em>Same dashboard in English</em></p>
 
-Same dashboard in English:
-
-![Windows dashboard — English UI](docs/Assets/Screenshot%202026-09-26%20021809.png)
-
-Exported HTML report — checks, risk, actions (sensitive fields redacted in this screenshot):
-
-![HTML audit report with checks and evidence](docs/Assets/Screenshot%202026-09-26%20022019.png)
+<p align="center">
+  <img src="docs/Assets/Screenshot%202026-09-26%20022019.png" alt="HTML audit report with checks and evidence" width="900">
+</p>
+<p align="center"><em>Exported HTML report — checks, risk, actions (sensitive fields redacted)</em></p>
 
 ---
 
@@ -53,9 +56,9 @@ Exported HTML report — checks, risk, actions (sensitive fields redacted in thi
 Requirements:
 
 - Windows 10/11
-- [Python 3.10+](https://www.python.org/downloads/windows/) with the **py** launcher
+- [Python 3.10+](https://www.python.org/downloads/windows/) with the <strong>py</strong> launcher
 - Optional: [VLC](https://www.videolan.org/vlc/) to view a confirmed stream
-- Optional: FFmpeg on `PATH` for snapshot fallback
+- Optional: FFmpeg on <code>PATH</code> for snapshot fallback
 
 ### Start the GUI
 
@@ -66,13 +69,13 @@ Requirements:
 4. Use Full audit / Check access / Check video.
 ```
 
-Or from PowerShell in `windows-audit/`:
+Or from PowerShell in <code>windows-audit/</code>:
 
 ```powershell
 py -3 gui.py
 ```
 
-Switch **BG / EN** in the top right. Saved cameras keep IP, port and username — **passwords are never stored** in the inventory.
+Switch <strong>BG / EN</strong> in the top right. Saved cameras keep IP, port and username — <strong>passwords are never stored</strong> in the inventory.
 
 ### What the GUI can do
 
