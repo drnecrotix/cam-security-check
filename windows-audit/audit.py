@@ -20,7 +20,7 @@ import xml.etree.ElementTree as ET
 from password_audit import assess
 from reporting import checklist
 from security_assessment import assess as assess_security
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunsplit, unquote
 from xml.sax.saxutils import escape
 
 SOAP = 'http://www.w3.org/2003/05/soap-envelope'
@@ -103,7 +103,8 @@ def wireless_information(device, timeout, credentials=None):
         for config in dot11[:4]:
             ssid = first_text(config, 'SSID')
             if ssid:
-                wireless.append({'interface': entry['name'], 'ssid': ssid[:80], 'source': 'GetNetworkInterfaces'})
+                wireless.append({'interface': entry['name'], 'ssid': ssid[:80],
+                                 'frequency': radio_frequency(config), 'source': 'GetNetworkInterfaces'})
         if token and (dot11 or first_text(node, 'InterfaceType') == '71'):
             request = (f'<d:GetDot11Status xmlns:d="{DEV}">'
                        f'<d:InterfaceToken>{escape(token)}</d:InterfaceToken></d:GetDot11Status>')
@@ -116,8 +117,30 @@ def wireless_information(device, timeout, credentials=None):
                     wireless.append({'interface': entry['name'], 'ssid': ssid[:80],
                                      'bssid': (first_text(state, 'BSSID') or '')[:40],
                                      'signal': (first_text(state, 'SignalStrength') or '')[:40],
+                                     'frequency': radio_frequency(state) or (radio_frequency(dot11[0]) if dot11 else None),
                                      'source': 'GetDot11Status'})
     return interfaces[:8], wireless[:8]
+
+
+def radio_frequency(node):
+    """Only use an explicit frequency/channel field; ONVIF does not require one."""
+    for field in ('Frequency', 'FrequencyMHz', 'Channel'):
+        raw = first_text(node, field) if node is not None else None
+        if not raw or not raw.isdecimal():
+            continue
+        value = int(raw)
+        if field == 'Channel':
+            if 1 <= value <= 13:
+                value = 2407 + value * 5
+            elif value == 14:
+                value = 2484
+            elif 30 <= value <= 177:
+                value = 5000 + value * 5
+            else:
+                continue
+        if 2300 <= value <= 7200:
+            return f'{value} MHz'
+    return None
 
 
 def configuration_snapshot(device, timeout, credentials=None):
@@ -281,6 +304,22 @@ def rtsp_describe(uri, ip, timeout, credentials=None):
         return 'connection_failed: ' + str(error)
 
 
+def split_stream_credentials(uri, ip):
+    """Separate ONVIF URI userinfo before an anonymous RTSP request."""
+    parsed = urlparse(uri)
+    try:
+        if parsed.scheme != 'rtsp' or ipaddress.ip_address(parsed.hostname) != ip:
+            return uri, None
+        port = parsed.port
+    except (ValueError, TypeError):
+        return uri, None
+    if parsed.username is None and parsed.password is None:
+        return uri, None
+    clean = urlunsplit(('rtsp', str(ip) + (f':{port}' if port else ''),
+                        parsed.path, parsed.query, ''))
+    return clean, (unquote(parsed.username or ''), unquote(parsed.password or ''))
+
+
 def find_vlc():
     candidates = [shutil.which('vlc')]
     for key in ('PROGRAMFILES', 'PROGRAMFILES(X86)'):
@@ -416,7 +455,10 @@ def main():
                 result['sensitive']['stream_uris'].append(uri)
             result['anonymous_stream_uri'] = bool(uri)
             if uri:
-                result['rtsp_describe'] = rtsp_describe(uri, ip, a.timeout)
+                probe_uri, embedded = split_stream_credentials(uri, ip)
+                result['rtsp_describe'] = rtsp_describe(probe_uri, ip, a.timeout)
+                if embedded and not credentials:
+                    result['authenticated_rtsp_describe'] = rtsp_describe(probe_uri, ip, a.timeout, embedded)
                 if a.view_video and result['rtsp_describe'].startswith('RTSP/1.0 200 '):
                     vlc = find_vlc()
                     if vlc:
@@ -437,9 +479,10 @@ def main():
                 result['sensitive']['stream_uris'].append(auth_uri)
             result['authenticated_stream_uri'] = bool(auth_uri)
             if auth_uri:
+                probe_uri, embedded = split_stream_credentials(auth_uri, ip)
                 if result['rtsp_describe'] is None:
-                    result['rtsp_describe'] = rtsp_describe(auth_uri, ip, a.timeout)
-                result['authenticated_rtsp_describe'] = rtsp_describe(auth_uri, ip, a.timeout, credentials)
+                    result['rtsp_describe'] = rtsp_describe(probe_uri, ip, a.timeout)
+                result['authenticated_rtsp_describe'] = rtsp_describe(probe_uri, ip, a.timeout, credentials or embedded)
         if a.snapshot:
             if not a.snapshot.lower().endswith(('.jpg', '.jpeg')):
                 p.error('Snapshot path must end with .jpg or .jpeg')

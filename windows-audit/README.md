@@ -113,12 +113,14 @@ When you enter an ONVIF or RTSP password, the app compares it locally against a 
 
 ### Missing confidential fields and camera Wi-Fi
 
-The confidential export explains whether stream collection was enabled at the time of the latest audit. An empty stream list means the camera returned no ONVIF stream URI, or the RTSP path was not supplied for a non-ONVIF camera. The username and password fields contain only credentials entered for that specific check; the app does not retrieve an existing password from a camera.
+The confidential export explains whether stream collection was enabled at the time of the latest audit. An empty stream list means the camera returned no ONVIF stream URI, or the RTSP path was not supplied for a non-ONVIF camera. Credential fields use the entered account or credentials explicitly embedded in a returned RTSP URI; the app does not retrieve a stored camera password.
+If a collected RTSP URI explicitly embeds a username or password, confidential HTML and JSON exports populate the otherwise empty credential fields from that URI and identify the source. This is not the camera's Wi-Fi/LAN network password. Missing SSID, network credentials and radio frequency are labeled **Няма данни / No data**. Standard exports continue to omit the entire sensitive section.
 
 For ONVIF devices supporting IEEE 802.11 operations, the full audit reads `GetNetworkInterfaces` and `GetDot11Status` for configured/active SSID, BSSID and signal strength. It never includes Wi-Fi PSK or passphrase fields. Wired devices and cameras that do not expose these operations show an explicit unavailable state. The report footer links `dr.necrotix` to `https://github.com/drnecrotix` in a new browser tab.
 
 ### Camera settings and bilingual HTML report
 
 **Пълен отчет / Full audit** reads a bounded set of available ONVIF configuration: network protocols, hostname, DNS, NTP, device time settings, discovery mode and password complexity policy. The report also lists device identity, network interfaces, Wi-Fi status and video profiles where the camera returns them. Unsupported or denied operations are marked not provided. This is not a complete vendor configuration dump; credentials, Wi-Fi keys and private vendor settings are excluded.
+The full audit also assesses whether the returned network protocol configuration enables HTTPS and records the discovery mode. A disabled HTTPS setting is a finding, while missing settings stay unknown. Wi-Fi frequency is reported only when the device provides an explicit frequency or channel field. For non-ONVIF cameras, a bounded RTSP OPTIONS request checks whether the supplied RTSP port responds even if no stream path is known. OPTIONS alone does not prove that video is available.
 
 The exported HTML contains BG and EN in the same file with an in-page language switch. Its footer links `dr.necrotix` to GitHub, and the final **Заяви Поддръжка / Request Support** button opens NecrotixLab Services in a new tab.

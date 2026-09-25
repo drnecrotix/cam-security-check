@@ -1,6 +1,27 @@
 """Human-readable bilingual CCTV audit with no passwords or stream URLs."""
 from datetime import datetime
 from html import escape
+from urllib.parse import urlsplit, unquote
+
+
+def confidential_fields(sensitive):
+    """Use explicit input first, then credentials embedded in a collected RTSP URL."""
+    username, password = sensitive.get('username'), sensitive.get('password')
+    sources = {}
+    for uri in sensitive.get('stream_uris') or []:
+        try:
+            parsed = urlsplit(uri)
+            if parsed.scheme != 'rtsp':
+                continue
+            if username is None and parsed.username is not None:
+                username = unquote(parsed.username)
+                sources['username'] = 'RTSP URI'
+            if password is None and parsed.password is not None:
+                password = unquote(parsed.password)
+                sources['password'] = 'RTSP URI'
+        except ValueError:
+            continue
+    return username, password, sources
 
 
 def checklist(report):
@@ -138,9 +159,10 @@ def _render_localized(report, lang='bg'):
                         for t in security.get('tests', []))
     info = report.get('device_information') or {}
     info_rows = ''.join(f'<tr><th>{escape(str(k))}</th><td>{escape(str(v))}</td></tr>' for k, v in info.items() if v)
-    network_rows = ''.join(f'<tr><td>{escape(str(item.get("name") or "?"))}</td><td>{escape(str(item.get("mac") or "?"))}</td><td>{escape(", ".join(item.get("addresses") or []))}</td></tr>'
+    no_data = label('Няма данни', 'No data')
+    network_rows = ''.join(f'<tr><td>{escape(str(item.get("name") or no_data))}</td><td>{escape(str(item.get("mac") or no_data))}</td><td>{escape(", ".join(item.get("addresses") or []) or no_data)}</td></tr>'
                            for item in report.get('network_interfaces') or [])
-    wireless_rows = ''.join(f'<tr><td>{escape(str(item.get("interface") or "?"))}</td><td>{escape(str(item.get("ssid") or "?"))}</td><td>{escape(str(item.get("bssid") or "?"))}</td><td>{escape(str(item.get("signal") or "?"))}</td></tr>'
+    wireless_rows = ''.join(f'<tr><td>{escape(str(item.get("interface") or no_data))}</td><td>{escape(str(item.get("ssid") or no_data))}</td><td>{escape(str(item.get("bssid") or no_data))}</td><td>{escape(str(item.get("signal") or no_data))}</td><td>{escape(str(item.get("frequency") or no_data))}</td></tr>'
                             for item in report.get('wireless_interfaces') or [])
     config_labels = {
         'network_protocols': ('Мрежови протоколи', 'Network protocols'),
@@ -162,10 +184,13 @@ def _render_localized(report, lang='bg'):
         f'<td>{escape(setting_value(item.get("values") or {})) if item.get("status") == "available" else escape(label("Не е предоставено", "Not provided"))}</td></tr>'
         for key, item in settings.items())
     sensitive = report.get('sensitive') or {}
-    missing = label('Не са въведени при проверката', 'Not supplied for this check')
+    missing = no_data
+    private_username, private_password, private_sources = confidential_fields(sensitive)
     private_rows = ''.join(f'<tr><th>{escape(key)}</th><td>{escape(str(value if value is not None else missing))}</td></tr>'
-                           for key, value in ((label('Потребител', 'Username'), sensitive.get('username')),
-                                              (label('Парола', 'Password'), sensitive.get('password'))))
+                           for key, value in ((label('Потребител', 'Username'), private_username),
+                                              (label('Парола', 'Password'), private_password)))
+    if private_sources:
+        private_rows += f'<tr><th>{label("Източник на данните", "Credential source")}</th><td>{label("Вграден в RTSP адреса", "Embedded in RTSP URI")}</td></tr>'
     private_rows += ''.join(f'<tr><th>RTSP {index}</th><td>{escape(str(uri))}</td></tr>'
                             for index, uri in enumerate(sensitive.get('stream_uris') or [], 1))
     if not sensitive.get('stream_uris'):
@@ -196,7 +221,7 @@ def _render_localized(report, lang='bg'):
 <h2>{label('Автоматични тестове', 'Automated security checks')}</h2><table><tr><th>{label('Тест', 'Test')}</th><th>{label('Статус', 'Status')}</th><th>{label('Доказателство', 'Evidence')}</th></tr>{test_rows or '<tr><td colspan="3">' + label('Няма данни', 'No data') + '</td></tr>'}</table>
 <h2>{label('Информация за устройството', 'Device information')}</h2><table>{info_rows or '<tr><td>' + label('Не е предоставена', 'Not provided') + '</td></tr>'}</table>
 <h2>{label('Мрежови интерфейси', 'Network interfaces')}</h2><table><tr><th>{label('Име', 'Name')}</th><th>MAC</th><th>IP</th></tr>{network_rows or '<tr><td colspan="3">' + label('Не са предоставени', 'Not provided') + '</td></tr>'}</table>
-<h2>{label('Wi-Fi данни от камерата', 'Camera Wi-Fi data')}</h2><table><tr><th>{label('Интерфейс', 'Interface')}</th><th>SSID</th><th>BSSID</th><th>{label('Сигнал', 'Signal')}</th></tr>{wireless_rows or '<tr><td colspan="4">' + label('Камерата не предостави Wi-Fi статус през ONVIF. Това не означава, че няма Wi-Fi.', 'The camera did not provide Wi-Fi status over ONVIF. This does not mean it has no Wi-Fi.') + '</td></tr>'}</table>
+<h2>{label('Wi-Fi данни от камерата', 'Camera Wi-Fi data')}</h2><table><tr><th>{label('Интерфейс', 'Interface')}</th><th>SSID</th><th>BSSID</th><th>{label('Сигнал', 'Signal')}</th><th>{label('Честота', 'Frequency')}</th></tr>{wireless_rows or '<tr><td colspan="5">' + no_data + '</td></tr>'}</table><p class="muted">{label('Потребител и парола за Wi-Fi/LAN мрежата: Няма данни.', 'Wi-Fi/LAN network username and password: No data.')}</p>
 <h2>{label('Достъпни настройки на камерата', 'Available camera settings')}</h2><p class="muted">{label('Показани са само настройки, върнати от използваните ONVIF заявки. Фабрични, частни за производителя и тайни настройки не могат да бъдат извлечени от този отчет.', 'Only settings returned by these ONVIF requests are shown. Vendor-specific and secret settings are outside this report.')}</p><table>{setting_rows or '<tr><td>' + label('Изпълни Пълен отчет за четене на настройки. Камера без ONVIF не предоставя този раздел.', 'Run Full audit to read settings. A non-ONVIF camera does not provide this section.') + '</td></tr>'}</table>
 {private_section}
 <h2>{label('Проверки и доказателства', 'Checks and evidence')}</h2><table><thead><tr><th>{label('Проверка', 'Check')}</th><th>{label('Резултат', 'Result')}</th><th>{label('Риск', 'Risk')}</th><th>{label('Наблюдение', 'Observation')}</th><th>{label('Какво да подобриш', 'Action')}</th></tr></thead><tbody>{rows}</tbody></table>
