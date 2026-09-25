@@ -116,3 +116,9 @@ When you enter an ONVIF or RTSP password, the app compares it locally against a 
 The confidential export explains whether stream collection was enabled at the time of the latest audit. An empty stream list means the camera returned no ONVIF stream URI, or the RTSP path was not supplied for a non-ONVIF camera. The username and password fields contain only credentials entered for that specific check; the app does not retrieve an existing password from a camera.
 
 For ONVIF devices supporting IEEE 802.11 operations, the full audit reads `GetNetworkInterfaces` and `GetDot11Status` for configured/active SSID, BSSID and signal strength. It never includes Wi-Fi PSK or passphrase fields. Wired devices and cameras that do not expose these operations show an explicit unavailable state. The report footer links `dr.necrotix` to `https://necrotixlab.com/services` in a new browser tab.
+
+### Camera settings and bilingual HTML report
+
+**Пълен отчет / Full audit** reads a bounded set of available ONVIF configuration: network protocols, hostname, DNS, NTP, device time settings, discovery mode and password complexity policy. The report also lists device identity, network interfaces, Wi-Fi status and video profiles where the camera returns them. Unsupported or denied operations are marked not provided. This is not a complete vendor configuration dump; credentials, Wi-Fi keys and private vendor settings are excluded.
+
+The exported HTML contains BG and EN in the same file with an in-page language switch. Its footer links `dr.necrotix` to NecrotixLab Services, and the final **Заяви Поддръжка / Request Support** button opens the same page in a new tab.
