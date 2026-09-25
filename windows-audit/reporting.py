@@ -128,6 +128,24 @@ def render_html(report, lang='bg'):
     label = lambda bg, english: english if en else bg
     items = report.get('checklist') or checklist(report)
     selected = 'en' if en else 'bg'
+    security = report.get('security_assessment') or {}
+    ratings = {'excellent': ('Отлична', 'Excellent'), 'good': ('Добра', 'Good'),
+               'weak': ('Слаба', 'Weak'), 'insufficient_data': ('Недостатъчно данни', 'Insufficient data')}
+    grade = label(*ratings.get(security.get('rating'), ('Неоценена', 'Not assessed')))
+    test_labels = {'pass': ('Издържан', 'Passed'), 'fail': ('Неуспешен', 'Failed'),
+                   'unknown': ('Непроверен', 'Unknown')}
+    test_rows = ''.join(f'<tr><td>{escape(t[selected]["title"])}</td><td>{escape(label(*test_labels[t["status"]]))}</td><td>{escape(t[selected]["detail"])}</td></tr>'
+                        for t in security.get('tests', []))
+    info = report.get('device_information') or {}
+    info_rows = ''.join(f'<tr><th>{escape(str(k))}</th><td>{escape(str(v))}</td></tr>' for k, v in info.items() if v)
+    sensitive = report.get('sensitive') or {}
+    private_rows = ''.join(f'<tr><th>{escape(str(key))}</th><td>{escape(str(value or "-"))}</td></tr>'
+                           for key, value in (('username', sensitive.get('username')),
+                                              ('password', sensitive.get('password'))))
+    private_rows += ''.join(f'<tr><th>RTSP {index}</th><td>{escape(str(uri))}</td></tr>'
+                            for index, uri in enumerate(sensitive.get('stream_uris') or [], 1))
+    private_section = (f'<section class="summary"><h2>{label("Поверителни данни - не споделяй отчета", "Confidential data - do not share this report")}</h2><table>{private_rows}</table></section>'
+                       if sensitive else '')
     findings = [item for item in items if item.get('finding')]
     pending = [item for item in items if item[selected]['status'] in ('Не е проверено', 'Not checked')]
     rows = ''.join('<tr class="' + ('finding' if item.get('finding') else '') + '">' +
@@ -142,7 +160,11 @@ def render_html(report, lang='bg'):
     return f'''<!doctype html><html lang="{'en' if en else 'bg'}"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{label('CCTV отчет', 'CCTV report')}</title>
 <style>body{{font:15px/1.5 system-ui;background:#10151e;color:#e8eef5;max-width:1180px;margin:32px auto;padding:0 20px}}h1,h2{{line-height:1.2}}.muted{{color:#a8b8c9}}.summary{{background:#1b2532;border-left:4px solid #35b7a8;padding:12px 18px;border-radius:5px}}.summary li{{margin:8px 0}}table{{border-collapse:collapse;width:100%;margin:16px 0}}th,td{{border-bottom:1px solid #374555;padding:10px;text-align:left;vertical-align:top}}th{{background:#1b2532}}.finding td:nth-child(3){{color:#f6c453;font-weight:bold}}footer{{text-align:right;color:#a8b8c9;padding:30px 0 12px}}@media(max-width:760px){{thead{{display:none}}tr{{display:block;border:1px solid #374555;margin:12px 0}}td{{display:block;border:0}}td::before{{content:attr(data-label) ': ';font-weight:bold;color:#35b7a8}}}}@media print{{body{{background:white;color:black}}.summary,th{{background:#eee}}footer{{color:#333}}}}</style>
 <h1>{label('Подробен CCTV отчет', 'Detailed CCTV report')}</h1><p class="muted">{escape(str(report.get('camera_type') or 'ONVIF'))} · {escape(str(report.get('target', '?')))}:{escape(str(report.get('port', '?')))} · {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M %Z')}</p>
+<section class="summary"><h2>{label('Оценка на защитата', 'Security rating')}: {escape(grade)}</h2><p>{label('Издържани', 'Passed')}: {security.get('counts', {}).get('pass', 0)} · {label('Неуспешни', 'Failed')}: {security.get('counts', {}).get('fail', 0)} · {label('Непроверени', 'Unknown')}: {security.get('counts', {}).get('unknown', 0)}</p><p class="muted">{label('Оценката обхваща само изброените проверки. Недостъпно устройство не се счита за защитено.', 'The rating covers only listed checks. An unreachable device is not considered secure.')}</p></section>
 <section class="summary"><h2>{label('Приоритетни действия', 'Priority actions')}</h2><p>{label('Установени слаби места', 'Findings')}: {len(findings)} · {label('Непроверени', 'Not checked')}: {len(pending)}</p><ul>{summary or '<li>' + label('Няма потвърдено слабо място от извършените проверки.', 'No weakness confirmed by the performed checks.') + '</li>'}</ul></section>
+<h2>{label('Автоматични тестове', 'Automated security checks')}</h2><table><tr><th>{label('Тест', 'Test')}</th><th>{label('Статус', 'Status')}</th><th>{label('Доказателство', 'Evidence')}</th></tr>{test_rows or '<tr><td colspan="3">' + label('Няма данни', 'No data') + '</td></tr>'}</table>
+<h2>{label('Информация за устройството', 'Device information')}</h2><table>{info_rows or '<tr><td>' + label('Не е предоставена', 'Not provided') + '</td></tr>'}</table>
+{private_section}
 <h2>{label('Проверки и доказателства', 'Checks and evidence')}</h2><table><thead><tr><th>{label('Проверка', 'Check')}</th><th>{label('Резултат', 'Result')}</th><th>{label('Риск', 'Risk')}</th><th>{label('Наблюдение', 'Observation')}</th><th>{label('Какво да подобриш', 'Action')}</th></tr></thead><tbody>{rows}</tbody></table>
 <h2>{label('Видео профили', 'Video profiles')}</h2><table><tr><th>{label('Име', 'Name')}</th><th>{label('Резолюция', 'Resolution')}</th><th>{label('Кодек', 'Codec')}</th></tr>{profile_rows or '<tr><td colspan="3">' + label('Няма получени профили', 'No profiles received') + '</td></tr>'}</table>
 <p class="muted">{label('RTSP DESCRIBE 200 не доказва възпроизвеждане. Отрицателен тест не доказва пълна защита. Паролата се оценява локално и не се записва.', 'RTSP DESCRIBE 200 does not prove playback. A negative test does not prove complete security. Password assessment is local and the password is not saved.')}</p>
