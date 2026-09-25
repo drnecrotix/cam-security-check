@@ -57,7 +57,7 @@ EN = {
     'Порт': 'Port', 'Услуга': 'Service', 'Използвай адрес и порт': 'Use address and port',
     'Избери ONVIF потребител': 'Select ONVIF username',
     'Камерата върна няколко потребителя. Избери своя:': 'The camera returned several users. Select yours:',
-    'Използвай': 'Use',
+    'Използвай': 'Use', 'Други IP камери (RTSP/HTTP)': 'Other IP cameras (RTSP/HTTP)',
     'Камера и достъп': 'Camera and access', 'Проверки': 'Checks',
     'Резултат и конзола': 'Results and console', 'Търсене и мрежа': 'Discovery and network',
     'Готово за проверка. Избери камера или въведи IP адрес.': 'Ready to check. Select a camera or enter its IP address.',
@@ -105,6 +105,8 @@ class App:
         self.cameras = self.load_cameras()
         self.scan_ports = tk.StringVar(value=DEFAULT_PORTS)
         self.network = tk.StringVar()
+        self.generic_http_port = '80'
+        self.generic_rtsp_port = '554'
         self.status = tk.StringVar(value='Въведи локалния IP адрес на твоята камера.')
         self.discovery_window = None
         self.scan_busy = False
@@ -149,6 +151,7 @@ class App:
         quick.pack(fill='x', pady=(12, 8))
         ttk.Button(quick, text='Търсене и мрежа', command=self.open_discovery).pack(side='left', padx=(0, 6))
         ttk.Button(quick, text='Открий ONVIF потребител', command=self.discover_username_only).pack(side='left', padx=(0, 6))
+        ttk.Button(quick, text='Други IP камери (RTSP/HTTP)', command=self.open_generic_camera).pack(side='left', padx=(0, 6))
         ttk.Button(quick, text='Отдалечен достъп през Tailscale', command=self.remote_help).pack(side='left')
 
         actions = ttk.LabelFrame(shell, text='Проверки', padding=10)
@@ -183,6 +186,69 @@ class App:
         self.apply_language()
         self.show(self.say('Готово за проверка. Избери камера или въведи IP адрес.',
                            'Ready to check. Select a camera or enter its IP address.'))
+
+    def open_generic_camera(self):
+        window = tk.Toplevel(self.root)
+        window.configure(bg=DARK['bg'])
+        window.title(self.say('Други IP камери', 'Other IP cameras'))
+        window.geometry('650x360')
+        window.minsize(650, 360)
+        box = ttk.Frame(window, padding=18)
+        box.pack(fill='both', expand=True)
+        ttk.Label(box, text=self.say('Камера без ONVIF - провери нейния уеб интерфейс и RTSP поток.',
+                                      'Camera without ONVIF - check its web interface and RTSP stream.'),
+                  wraplength=590).pack(anchor='w', pady=(0, 10))
+        http_port = tk.StringVar(value=self.generic_http_port)
+        rtsp_port = tk.StringVar(value=self.generic_rtsp_port)
+        path = tk.StringVar()
+        for caption, variable in [
+            (self.say('HTTP порт', 'HTTP port'), http_port),
+            (self.say('RTSP порт', 'RTSP port'), rtsp_port),
+            (self.say('RTSP път от настройките на камерата (напр. /stream1)',
+                      'RTSP path from camera settings (e.g. /stream1)'), path)]:
+            row = ttk.Frame(box)
+            row.pack(fill='x', pady=4)
+            ttk.Label(row, text=caption, width=43).pack(side='left')
+            ttk.Entry(row, textvariable=variable).pack(side='left', fill='x', expand=True)
+        ttk.Label(box, text=self.say('Остави RTSP пътя празен, ако не го знаеш. Тогава видеото няма да се проверява.',
+                                      'Leave the RTSP path blank if unknown. Video will not be tested.'),
+                  wraplength=590).pack(anchor='w', pady=(10, 14))
+
+        def check():
+            try:
+                ip = ipaddress.ip_address(self.ip.get().strip())
+                hp, rp = int(http_port.get()), int(rtsp_port.get())
+                if (ip.version != 4 or not ip.is_private or ip.is_loopback or ip.is_link_local or
+                        ip.is_reserved or not 1 <= hp <= 65535 or not 1 <= rp <= 65535):
+                    raise ValueError()
+                rtsp_path = path.get().strip()
+                if rtsp_path and (not rtsp_path.startswith('/') or len(rtsp_path) > 256 or
+                                  any(c in rtsp_path for c in '\r\n?#@') or '..' in rtsp_path):
+                    raise ValueError()
+            except ValueError:
+                messagebox.showerror(self.say('Невалиден адрес или порт', 'Invalid address or port'),
+                                     self.say('Въведи частен IP адрес, валидни портове и RTSP път започващ с /.',
+                                              'Enter a private IP, valid ports and an RTSP path starting with /.'))
+                return
+            if any(button.cget('state') == 'disabled' for button in self.buttons):
+                return
+            args = [sys.executable, str(Path(__file__).with_name('generic_camera.py')), str(ip),
+                    '--http-port', str(hp), '--rtsp-port', str(rp)]
+            if rtsp_path:
+                args += ['--rtsp-path', rtsp_path]
+            password = None
+            if self.username.get().strip() and self.password.get():
+                args += ['--username', self.username.get().strip(), '--password-stdin']
+                password = self.password.get() + '\n'
+            self.generic_http_port, self.generic_rtsp_port = str(hp), str(rp)
+            for button in self.buttons:
+                button.configure(state='disabled')
+            self.set_status('busy', 'Проверявам IP камерата...', 'Checking IP camera...')
+            self.show(self.say('Проверка на HTTP и RTSP...', 'Checking HTTP and RTSP...'))
+            window.destroy()
+            threading.Thread(target=self.worker, args=(args, password), daemon=True).start()
+
+        ttk.Button(box, text=self.say('Провери камерата', 'Check camera'), command=check).pack(anchor='e')
 
     def open_discovery(self):
         if self.discovery_window and self.discovery_window.winfo_exists():
@@ -526,6 +592,10 @@ class App:
             ip, port, service, source = tree.item(selected[0], 'values')
             if source != 'WS-Discovery' and not service.startswith('ONVIF'):
                 self.ip.set(ip)
+                if service.startswith('RTSP') and port.isdigit():
+                    self.generic_rtsp_port = port
+                elif service.startswith('HTTP') and port.isdigit():
+                    self.generic_http_port = port
                 self.status.set('IP е попълнен, но ONVIF портът не е потвърден.' if not english else 'IP filled; ONVIF port is not confirmed.')
             else:
                 self.ip.set(ip)
@@ -678,13 +748,21 @@ class App:
             if not selected:
                 return
             ip, port, service = tree.item(selected[0], 'values')
-            if not service.startswith('ONVIF'):
-                messagebox.showinfo(self.say('Друг тип услуга', 'Other service'),
-                                    self.say('Този порт не е потвърден като ONVIF порт.', 'This port is not confirmed as ONVIF.'))
-                return
             self.ip.set(ip)
-            self.port.set(port)
-            window.destroy()
+            if service.startswith('ONVIF'):
+                self.port.set(port)
+                window.destroy()
+            elif service.startswith(('RTSP', 'HTTP')):
+                if service.startswith('RTSP'):
+                    self.generic_rtsp_port = port
+                else:
+                    self.generic_http_port = port
+                window.destroy()
+                self.open_generic_camera()
+            else:
+                self.status.set(self.say('IP е попълнен; типът на услугата не е потвърден.',
+                                         'IP filled; service type is unconfirmed.'))
+                window.destroy()
 
         ttk.Button(box, text='Използвай адрес и порт', command=choose).pack(anchor='e', pady=(8, 0))
         self.apply_language()
@@ -753,7 +831,9 @@ class App:
     def finish(self, result, report=None):
         self.last_report = report
         self.show(self.format_report(report) if report else result)
-        reachable = bool(report and (report.get('anonymous_capabilities') or report.get('authenticated_capabilities')
+        reachable = bool(report and (report.get('http_status_generic') is not None or
+                                     (report.get('rtsp_describe') or '').startswith('RTSP/') or
+                                     report.get('anonymous_capabilities') or report.get('authenticated_capabilities')
                                      or report.get('anonymous_profiles') or report.get('authenticated_profiles')))
         self.set_status('ok' if reachable else 'error',
                         'Проверката приключи.' if reachable else 'ONVIF не отговори успешно. Провери адреса, порта и връзката.',
@@ -765,6 +845,16 @@ class App:
         english = self.language.get() == 'EN'
         yes = lambda value: ('Yes' if value else 'Not confirmed') if english else ('Да' if value else 'Не е потвърдено')
         label = (lambda bg, en: en if english else bg)
+        if report.get('camera_type'):
+            lines = [f"{label('Камера', 'Camera')}: {report['target']}",
+                     f"HTTP: {report.get('http_status_generic') or '-'}",
+                     f"RTSP: {report.get('rtsp_describe') or label('Не е проверено', 'Not checked')}"]
+            lines += ['', label('Проверки и препоръки:', 'Checks and recommendations:')]
+            for item in report.get('checklist') or checklist(report):
+                local = item['en' if english else 'bg']
+                lines += [f"- {local['title']}: {local['status']} ({local['risk']})",
+                          f"  {local['evidence']}", f"  {local['action']}"]
+            return '\n'.join(lines)
         lines = [f"{label('Камера', 'Camera')}: {report['target']}:{report['port']}",
                  f"{label('ONVIF без парола', 'ONVIF without password')}: {yes(report.get('anonymous_capabilities'))}",
                  f"{label('Профили без парола', 'Profiles without password')}: {yes(report.get('anonymous_profiles'))}",
