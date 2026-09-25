@@ -12,6 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 from scan import DEFAULT_PORTS, parse_ports, scan_hosts
 from wifi_scan import nearby_networks
 from reporting import render_html
+from local_lan import ethernet_networks
 
 CONFIG_PATH = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'CameraAudit' / 'cameras.json'
 
@@ -36,7 +37,7 @@ class App:
         frame = ttk.Frame(root, padding=18)
         frame.pack(fill='both', expand=True)
         ttk.Label(frame, text='Проверка на собствена камера', font=('Segoe UI', 17, 'bold')).pack(anchor='w')
-        ttk.Label(frame, text='Само една камера в частната ти мрежа. Без търсене на други устройства.').pack(anchor='w', pady=(4, 16))
+        ttk.Label(frame, text='Въведи локалния IP на камерата или намери камери в своята домашна мрежа.').pack(anchor='w', pady=(4, 16))
 
         saved = ttk.Frame(frame)
         saved.pack(fill='x', pady=(0, 10))
@@ -68,7 +69,7 @@ class App:
 
         discover = ttk.Frame(frame)
         discover.pack(fill='x', pady=(12, 0))
-        ttk.Label(discover, text='Портове за търсене').pack(anchor='w')
+        ttk.Label(discover, text='Портове за търсене (може да намалиш списъка за по-бърза проверка)').pack(anchor='w')
         line = ttk.Frame(discover)
         line.pack(fill='x')
         ttk.Entry(line, textvariable=self.scan_ports).pack(side='left', fill='x', expand=True, padx=(0, 8))
@@ -76,10 +77,11 @@ class App:
         self.scan_button.pack(side='left')
         network_line = ttk.Frame(discover)
         network_line.pack(fill='x', pady=(8, 0))
-        ttk.Label(network_line, text='Локална мрежа (CIDR)').pack(side='left', padx=(0, 8))
+        ttk.Label(network_line, text='Локален адрес или CIDR').pack(side='left', padx=(0, 8))
         ttk.Entry(network_line, textvariable=self.network).pack(side='left', fill='x', expand=True, padx=(0, 8))
-        self.network_button = ttk.Button(network_line, text='Намери IP адреси', command=lambda: self.start_scan(True))
+        self.network_button = ttk.Button(network_line, text='Намери камери', command=lambda: self.start_scan(True))
         self.network_button.pack(side='left')
+        ttk.Button(discover, text='Открий кабелната LAN мрежа', command=self.find_ethernet).pack(anchor='w', pady=(8, 0))
         ttk.Button(discover, text='Отдалечен достъп през Tailscale', command=self.remote_help).pack(anchor='w', pady=(8, 0))
         ttk.Button(discover, text='Видими Wi-Fi сигнали наблизо', command=self.wifi_signals).pack(anchor='w', pady=(4, 0))
 
@@ -199,6 +201,39 @@ class App:
         ttk.Button(box, text='Обнови списъка', command=update).pack(anchor='e', pady=(8, 0))
         update()
 
+    def find_ethernet(self):
+        self.status.set('Откривам активната кабелна мрежа...')
+        def worker():
+            try:
+                networks = ethernet_networks()
+                self.root.after(0, lambda: self.choose_ethernet(networks))
+            except RuntimeError as error:
+                message = str(error)
+                self.root.after(0, lambda: self.status.set(message))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def choose_ethernet(self, networks):
+        window = tk.Toplevel(self.root)
+        window.title('Избери кабелна мрежа')
+        window.geometry('500x250')
+        box = ttk.Frame(window, padding=14)
+        box.pack(fill='both', expand=True)
+        ttk.Label(box, text='Активни Ethernet мрежи. Избери твоята домашна мрежа:', wraplength=460).pack(anchor='w')
+        listbox = tk.Listbox(box)
+        listbox.pack(fill='both', expand=True, pady=10)
+        for name, ip, network in networks:
+            listbox.insert('end', f'{name} - {ip} - {network}')
+        listbox.selection_set(0)
+        def choose():
+            selection = listbox.curselection()
+            if not selection:
+                return
+            _, ip, network = networks[selection[0]]
+            self.network.set(network)
+            self.status.set(f'Открита LAN мрежа {network} (адрес на компютъра: {ip}). Натисни „Намери камери“.')
+            window.destroy()
+        ttk.Button(box, text='Използвай тази мрежа', command=choose).pack(anchor='e')
+
     def remote_help(self):
         window = tk.Toplevel(self.root)
         window.title('Отдалечен достъп до домашните камери')
@@ -209,7 +244,7 @@ class App:
                  '2. Въведи домашната мрежа в главния прозорец. На домашния компютър отвори PowerShell като администратор и изпълни генерираната команда.\n'
                  '3. Одобри маршрута в Tailscale Admin Console > Machines > Edit route settings.\n'
                  '4. Инсталирай Tailscale на отдалечения компютър и влез в същия акаунт.\n'
-                 '5. След свързване натисни „Намери IP адреси“ в главния прозорец. За /24 мрежа търси последователно четири /26 части.')
+                 '5. След свързване въведи домашния адрес, например 192.168.0.1, и натисни „Намери камери“.')
         ttk.Label(box, text=guide, wraplength=560, justify='left').pack(anchor='w', pady=(0, 12))
         command = tk.StringVar(value='Въведи валидна домашна мрежа в главния прозорец.')
         ttk.Entry(box, textvariable=command, state='readonly').pack(fill='x')
@@ -217,12 +252,13 @@ class App:
 
         def generate():
             try:
-                network = ipaddress.ip_network(self.network.get().strip(), strict=True)
+                raw = self.network.get().strip()
+                network = ipaddress.ip_network(raw if '/' in raw else raw + '/24', strict=False)
                 if network.version != 4 or not network.is_private or network.is_loopback or network.is_link_local or network.is_reserved:
                     raise ValueError()
                 command.set(f'tailscale up --advertise-routes={network}')
             except ValueError:
-                command.set('Въведи валидна домашна IPv4 мрежа, например 192.168.1.0/24.')
+                command.set('Въведи домашен адрес, например 192.168.0.1, или точната мрежа в CIDR формат.')
 
         def copy():
             if not command.get().startswith('tailscale up '):
@@ -252,26 +288,27 @@ class App:
     def start_scan(self, network_mode=False):
         try:
             if network_mode:
-                network = ipaddress.ip_network(self.network.get().strip(), strict=True)
-                if (network.version != 4 or network.num_addresses > 64 or
+                raw = self.network.get().strip()
+                network = ipaddress.ip_network(raw if '/' in raw else raw + '/24', strict=False)
+                if (network.version != 4 or network.num_addresses > 256 or
                     not all(ip.is_private and not ip.is_loopback and not ip.is_link_local and not ip.is_reserved
                             for ip in (network.network_address, network.broadcast_address))):
-                    raise ValueError('Използвай частна IPv4 мрежа с най-много 64 адреса (например 192.168.1.0/26).')
+                    raise ValueError('Въведи локален адрес като 192.168.0.1 или частна мрежа до /24, например 192.168.0.0/24.')
                 addresses = [str(ip) for ip in network.hosts()]
             else:
                 ip = ipaddress.ip_address(self.ip.get().strip())
                 if ip.version != 4 or not ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-                    raise ValueError('Въведи локален IPv4 адрес.')
+                    raise ValueError('Въведи локалния IP адрес на камерата (например 192.168.0.50). Публичният IP на рутера не е адрес на камерата. За достъп отдалечено първо свържи Tailscale.')
                 addresses = [str(ip)]
             ports = parse_ports(self.scan_ports.get())
-            if len(addresses) * len(ports) > 512:
-                raise ValueError('Намали списъка с портове до най-много 512 проверки общо.')
+            if len(addresses) * len(ports) > 2048:
+                raise ValueError('Намали списъка с портове до най-много 2048 проверки общо.')
         except ValueError as error:
             messagebox.showerror('Невалиден адрес или портове', str(error))
             return
         self.scan_button.configure(state='disabled')
         self.network_button.configure(state='disabled')
-        self.status.set(f'Търся услуги на {len(addresses)} адреса и {len(ports)} порта...')
+        self.status.set(f'Търся услуги на {len(addresses)} адреса и {len(ports)} порта. Това може да отнеме около минута...')
         threading.Thread(target=self.scan_worker, args=(addresses, ports), daemon=True).start()
 
     def scan_worker(self, addresses, ports):
@@ -290,7 +327,7 @@ class App:
     def show_scan(self, results):
         self.scan_button.configure(state='normal')
         self.network_button.configure(state='normal')
-        self.status.set(f'Открити отворени портове: {len(results)}')
+        self.status.set(f'Открити отворени портове: {len(results)}. Непозната услуга не доказва, че устройството е камера.')
         window = tk.Toplevel(self.root)
         window.title('Открити услуги на камерата')
         window.geometry('600x320')
@@ -327,7 +364,7 @@ class App:
             if ip.version != 4 or not ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or not 1 <= port <= 65535:
                 raise ValueError()
         except ValueError:
-            messagebox.showerror('Невалиден адрес', 'Въведи частен IPv4 адрес и ONVIF порт от 1 до 65535.')
+            messagebox.showerror('Невалиден адрес', 'Въведи локалния IP на камерата, например 192.168.0.50, и ONVIF порт от 1 до 65535. Публичният IP на рутера не е адрес на камерата. Ако си извън дома, свържи се през Tailscale.')
             return
         if flag == '--move-test' and not messagebox.askyesno('PTZ движение',
                 'Камерата може да се премести за кратко. Наблюдавай я и продължи само ако е твоя или имаш разрешение.'):
