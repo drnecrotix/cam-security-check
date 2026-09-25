@@ -82,3 +82,9 @@ The tool asks ONVIF for a stream URI, sends an anonymous RTSP `DESCRIBE`, and op
 - A failed test is not a comprehensive security assessment.
 
 If movement is exposed, update camera firmware, enable ONVIF authentication where supported, disable ONVIF if unused, block Internet exposure and restrict access to trusted LAN devices. Change default credentials.
+
+### Full audit and password check
+
+Use **Пълен отчет / Full audit** for anonymous ONVIF and RTSP video checks, an authenticated comparison when you enter credentials, video profiles, and a detailed checklist with evidence, risk and actions. Save the report as HTML or JSON. PTZ movement and snapshot capture remain separate explicit actions.
+
+The entered password is assessed offline for length, predictable patterns and a small built-in list of common values. The tool does not attempt password guessing against the camera. This heuristic is not a breach database check or proof that a password cannot be guessed. Password text is omitted from reports and saved camera entries. A successful credentialed request does not establish that authentication was enforced when the same anonymous operation succeeds.
