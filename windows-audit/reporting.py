@@ -19,6 +19,30 @@ def checklist(report):
                       'en': dict(zip(('title', 'status', 'risk', 'evidence', 'action'),
                                      (title[1], status[1], risk[1], evidence[1], fix[1])))})
 
+    if report.get('camera_type'):
+        http = report.get('http_status_generic')
+        add('http_interface', ('Уеб интерфейс', 'Web interface'),
+            http is not None if http is not None else None, 'info',
+            (f'HTTP отговор: {http}.' if http is not None else 'Няма HTTP отговор.',
+             f'HTTP response: {http}.' if http is not None else 'No HTTP response.'),
+            ('Провери дали интерфейсът изисква вход и дали има HTTPS.',
+             'Check whether the interface requires login and supports HTTPS.'))
+        rtsp = report.get('rtsp_describe')
+        rtsp_ok = rtsp.startswith('RTSP/1.0 200 ') if isinstance(rtsp, str) and rtsp.startswith('RTSP/') else None
+        add('rtsp', ('RTSP отговор без парола', 'RTSP response without password'), rtsp_ok, 'high',
+            (f'RTSP DESCRIBE: {rtsp}' if rtsp else 'Не е въведен RTSP път.',
+             f'RTSP DESCRIBE: {rtsp}' if rtsp else 'No RTSP path supplied.'),
+            ('Изисквай удостоверяване и провери възпроизвеждането.',
+             'Require authentication and verify actual playback.'))
+        auth = report.get('authenticated_rtsp_describe')
+        if report.get('authenticated') and report.get('rtsp_path_supplied'):
+            add('authenticated_rtsp', ('RTSP с данни', 'RTSP with credentials'),
+                auth.startswith('RTSP/1.0 200 ') if isinstance(auth, str) and auth.startswith('RTSP/') else None,
+                'info', (f'RTSP DESCRIBE: {auth}', f'RTSP DESCRIBE: {auth}'),
+                ('Сравни с анонимния резултат.', 'Compare with anonymous access.'))
+        _add_password(items, add, report)
+        return items
+
     specs = [
         ('anonymous_capabilities', ('ONVIF информация без парола', 'ONVIF capabilities without password'), 'medium',
          ('Камерата върна ONVIF възможностите без вход.', 'The camera returned ONVIF capabilities without login.'),
@@ -71,6 +95,17 @@ def checklist(report):
                 ('Сравни с анонимната проверка; успехът сам по себе си не доказва проверена парола.',
                  'Compare with anonymous access; success alone does not prove password validation.'))
 
+    _add_password(items, add, report)
+
+    if report.get('snapshot_saved') or report.get('snapshot_error'):
+        add('snapshot', ('Снимка', 'Snapshot'), bool(report.get('snapshot_saved')), 'info',
+            (('Снимката беше записана.', 'Snapshot was saved.') if report.get('snapshot_saved') else
+             ('Заявката за снимка не успя.', 'Snapshot request did not succeed.')),
+            ('Провери настройките за достъп до снимки.', 'Review snapshot access settings.'))
+    return items
+
+
+def _add_password(items, add, report):
     strength = report.get('password_assessment') or {}
     if strength.get('checked'):
         risk = strength.get('risk')
@@ -86,12 +121,6 @@ def checklist(report):
             ('Не са въведени данни за локална оценка.', 'No credentials were supplied for local assessment.'),
             ('Въведи собствен ONVIF акаунт за сравнение.', 'Supply your ONVIF account for comparison.'))
 
-    if report.get('snapshot_saved') or report.get('snapshot_error'):
-        add('snapshot', ('Снимка', 'Snapshot'), bool(report.get('snapshot_saved')), 'info',
-            (('Снимката беше записана.', 'Snapshot was saved.') if report.get('snapshot_saved') else
-             ('Заявката за снимка не успя.', 'Snapshot request did not succeed.')),
-            ('Провери настройките за достъп до снимки.', 'Review snapshot access settings.'))
-    return items
 
 
 def render_html(report, lang='bg'):
@@ -112,7 +141,7 @@ def render_html(report, lang='bg'):
     summary = ''.join(f'<li><strong>{escape(item[selected]["title"])}</strong> - {escape(item[selected]["action"])}</li>' for item in findings)
     return f'''<!doctype html><html lang="{'en' if en else 'bg'}"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{label('CCTV отчет', 'CCTV report')}</title>
 <style>body{{font:15px/1.5 system-ui;background:#10151e;color:#e8eef5;max-width:1180px;margin:32px auto;padding:0 20px}}h1,h2{{line-height:1.2}}.muted{{color:#a8b8c9}}.summary{{background:#1b2532;border-left:4px solid #35b7a8;padding:12px 18px;border-radius:5px}}.summary li{{margin:8px 0}}table{{border-collapse:collapse;width:100%;margin:16px 0}}th,td{{border-bottom:1px solid #374555;padding:10px;text-align:left;vertical-align:top}}th{{background:#1b2532}}.finding td:nth-child(3){{color:#f6c453;font-weight:bold}}footer{{text-align:right;color:#a8b8c9;padding:30px 0 12px}}@media(max-width:760px){{thead{{display:none}}tr{{display:block;border:1px solid #374555;margin:12px 0}}td{{display:block;border:0}}td::before{{content:attr(data-label) ': ';font-weight:bold;color:#35b7a8}}}}@media print{{body{{background:white;color:black}}.summary,th{{background:#eee}}footer{{color:#333}}}}</style>
-<h1>{label('Подробен CCTV отчет', 'Detailed CCTV report')}</h1><p class="muted">{escape(str(report.get('target', '?')))}:{escape(str(report.get('port', '?')))} · {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M %Z')}</p>
+<h1>{label('Подробен CCTV отчет', 'Detailed CCTV report')}</h1><p class="muted">{escape(str(report.get('camera_type') or 'ONVIF'))} · {escape(str(report.get('target', '?')))}:{escape(str(report.get('port', '?')))} · {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M %Z')}</p>
 <section class="summary"><h2>{label('Приоритетни действия', 'Priority actions')}</h2><p>{label('Установени слаби места', 'Findings')}: {len(findings)} · {label('Непроверени', 'Not checked')}: {len(pending)}</p><ul>{summary or '<li>' + label('Няма потвърдено слабо място от извършените проверки.', 'No weakness confirmed by the performed checks.') + '</li>'}</ul></section>
 <h2>{label('Проверки и доказателства', 'Checks and evidence')}</h2><table><thead><tr><th>{label('Проверка', 'Check')}</th><th>{label('Резултат', 'Result')}</th><th>{label('Риск', 'Risk')}</th><th>{label('Наблюдение', 'Observation')}</th><th>{label('Какво да подобриш', 'Action')}</th></tr></thead><tbody>{rows}</tbody></table>
 <h2>{label('Видео профили', 'Video profiles')}</h2><table><tr><th>{label('Име', 'Name')}</th><th>{label('Резолюция', 'Resolution')}</th><th>{label('Кодек', 'Codec')}</th></tr>{profile_rows or '<tr><td colspan="3">' + label('Няма получени профили', 'No profiles received') + '</td></tr>'}</table>
