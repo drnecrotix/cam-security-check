@@ -11,7 +11,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from scan import DEFAULT_PORTS, parse_ports, scan_hosts
 from wifi_scan import nearby_networks
-from reporting import render_html
+from reporting import render_html, checklist
 from local_lan import ethernet_networks
 from audit import discover_usernames
 from device_discovery import discover_onvif, windows_neighbors
@@ -36,7 +36,7 @@ EN = {
     'Отдалечен достъп през Tailscale': 'Remote access via Tailscale',
     'Видими Wi-Fi сигнали наблизо': 'Nearby Wi-Fi signals',
     'Открий устройства и ONVIF камери': 'Discover devices and ONVIF cameras',
-    'Провери достъпа': 'Check access', 'Провери видео': 'Check video',
+    'Пълен отчет': 'Full audit', 'Провери достъпа': 'Check access', 'Провери видео': 'Check video',
     'Покажи видео във VLC': 'View video in VLC', 'Снимка от видео': 'Take snapshot',
     'Тествай PTZ движение': 'Test PTZ movement',
     'Запази последния отчет': 'Save latest report',
@@ -173,7 +173,7 @@ class App:
         buttons = ttk.Frame(frame)
         buttons.pack(fill='x', pady=(18, 12))
         self.buttons = []
-        for label, flag in [('Провери достъпа', None), ('Провери видео', '--video-test'),
+        for label, flag in [('Пълен отчет', '--full-audit'), ('Провери достъпа', None), ('Провери видео', '--video-test'),
                             ('Покажи видео във VLC', '--view-video'), ('Снимка от видео', '--snapshot'),
                             ('Тествай PTZ движение', '--move-test')]:
             button = ttk.Button(buttons, text=label, command=lambda f=flag: self.run(f))
@@ -715,6 +715,12 @@ class App:
             lines.append(f"{label('Снимка', 'Snapshot')}: {label('Записана', 'Saved') if report.get('snapshot_saved') else report.get('snapshot_error')}")
         if report.get('movement_attempted'):
             lines.append(f"{label('PTZ движение прието', 'PTZ move accepted')}: {yes(report.get('movement_accepted'))}")
+        lines += ['', label('Подробен списък и слаби места:', 'Detailed checklist and weaknesses:')]
+        for item in report.get('checklist') or checklist(report):
+            local = item['en' if english else 'bg']
+            lines.append(f" - {local['title']}: {local['status']} [{local['risk']}]")
+            lines.append(f"   {local['evidence']}")
+            lines.append(f"   {local['action']}")
         lines += ['', label('Отрицателен тест не доказва пълна защита. Успех с данни не доказва проверена парола, ако анонимната заявка също работи.',
                              'A negative test does not prove security. A credentialed success does not prove the password was checked when anonymous access also works.')]
         return '\n'.join(lines)
