@@ -1,5 +1,6 @@
 """Bounded, single-host ONVIF and RTSP port discovery."""
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import ipaddress
 import socket
 
 from audit import DEV, call
@@ -36,30 +37,38 @@ def probe(ip, port):
     return response.startswith(b'RTSP/')
 
 
-def scan(ip, ports):
-    def check(port):
+def check(ip, port):
+    try:
+        with socket.create_connection((ip, port), timeout=0.7):
+            pass
+    except OSError:
+        return None
+    url = f'http://{ip}:{port}/onvif/device_service'
+    result = call(url, f'<d:GetCapabilities xmlns:d="{DEV}"><d:Category>All</d:Category></d:GetCapabilities>', 1.2)
+    if result['ok']:
+        service = 'ONVIF - достъп без парола'
+    elif result['status'] in (401, 403) or result['error'] == 'SOAP Fault':
+        service = 'ONVIF - вероятно изисква удостоверяване'
+    else:
         try:
-            with socket.create_connection((ip, port), timeout=1.2):
-                pass
+            service = 'RTSP' if probe(ip, port) else 'Отворен порт - непозната услуга'
         except OSError:
-            return None
-        url = f'http://{ip}:{port}/onvif/device_service'
-        result = call(url, f'<d:GetCapabilities xmlns:d="{DEV}"><d:Category>All</d:Category></d:GetCapabilities>', 1.5)
-        if result['ok']:
-            service = 'ONVIF - достъп без парола'
-        elif result['status'] in (401, 403) or result['error'] == 'SOAP Fault':
-            service = 'ONVIF - вероятно изисква удостоверяване'
-        else:
-            try:
-                service = 'RTSP' if probe(ip, port) else 'Отворен порт - непозната услуга'
-            except OSError:
-                service = 'Отворен порт - непозната услуга'
-        return (str(ip), port, service)
+            service = 'Отворен порт - непозната услуга'
+    return (str(ip), port, service)
+
+
+def scan_hosts(addresses, ports):
+    if len(addresses) > 64 or len(ports) > 32 or len(addresses) * len(ports) > 512:
+        raise ValueError('Най-много 64 адреса, 32 порта и 512 проверки наведнъж.')
 
     results = []
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        for future in as_completed([executor.submit(check, p) for p in ports]):
+    with ThreadPoolExecutor(max_workers=32) as executor:
+        for future in as_completed([executor.submit(check, ip, p) for ip in addresses for p in ports]):
             result = future.result()
             if result:
                 results.append(result)
-    return sorted(results, key=lambda row: row[1])
+    return sorted(results, key=lambda row: (ipaddress.ip_address(row[0]), row[1]))
+
+
+def scan(ip, ports):
+    return scan_hosts([ip], ports)
